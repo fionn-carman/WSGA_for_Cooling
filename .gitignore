@@ -1,0 +1,28 @@
+# Models (too large for git - download separately)
+models/
+
+# Data files
+data/
+training/data/
+
+# Outputs
+outputs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# PBS job logs
+*.e[0-9]*
+*.o[0-9]*
