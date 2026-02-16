@@ -1,0 +1,142 @@
+============================================================
+XGBoost Classification Model Summary: NR-AR-LBD
+============================================================
+
+Training completed: 2026-01-23 15:26:52
+Input file: tox21_cleaned.csv
+Valid samples: 6758
+Class distribution: 6521 neg, 237 pos (3.5% positive)
+Method: RFE+RandomizedSearchCV (Hybrid)
+
+----------------------------------------
+Feature Selection:
+----------------------------------------
+  Method: RFE with 3 repeats
+  Step size: 2
+  Selected features: 101
+
+----------------------------------------
+Best Hyperparameters:
+----------------------------------------
+  subsample: 0.7
+  scale_pos_weight: 1
+  n_estimators: 200
+  min_child_weight: 4
+  max_depth: 100
+  learning_rate: 0.05
+  colsample_bytree: 0.7
+
+----------------------------------------
+Performance Metrics:
+----------------------------------------
+5-Fold CV AUC:         0.9809
+Test Set ROC-AUC:      0.9459
+Test Set PR-AUC:       0.6183
+Test Set Accuracy:     0.9719
+Test Set F1:           0.5128
+Test Set MCC:          0.5138
+
+----------------------------------------
+Selected Features (101 total):
+----------------------------------------
+  NR-AR
+  NR-AhR
+  NR-Aromatase
+  NR-ER
+  NR-ER-LBD
+  NR-PPAR-gamma
+  SR-ARE
+  SR-ATAD5
+  SR-HSE
+  SR-MMP
+  SR-p53
+  MaxEStateIndex
+  MinEStateIndex
+  MinAbsEStateIndex
+  qed
+  HeavyAtomMolWt
+  MaxPartialCharge
+  MinPartialCharge
+  MaxAbsPartialCharge
+  MinAbsPartialCharge
+  FpDensityMorgan1
+  FpDensityMorgan2
+  FpDensityMorgan3
+  BCUT2D_MWHI
+  BCUT2D_MWLOW
+  BCUT2D_CHGHI
+  BCUT2D_CHGLO
+  BCUT2D_LOGPLOW
+  BCUT2D_MRHI
+  BCUT2D_MRLOW
+  BalabanJ
+  BertzCT
+  Chi1n
+  Chi1v
+  Chi2n
+  Chi2v
+  Chi3n
+  Chi3v
+  Chi4n
+  Chi4v
+  Ipc
+  Kappa2
+  PEOE_VSA1
+  PEOE_VSA10
+  PEOE_VSA11
+  PEOE_VSA12
+  PEOE_VSA13
+  PEOE_VSA14
+  PEOE_VSA2
+  PEOE_VSA6
+  PEOE_VSA7
+  PEOE_VSA8
+  PEOE_VSA9
+  SMR_VSA10
+  SMR_VSA4
+  SMR_VSA5
+  SMR_VSA6
+  SMR_VSA7
+  SlogP_VSA1
+  SlogP_VSA10
+  SlogP_VSA2
+  SlogP_VSA4
+  SlogP_VSA6
+  SlogP_VSA8
+  TPSA
+  EState_VSA10
+  EState_VSA2
+  EState_VSA3
+  EState_VSA4
+  EState_VSA5
+  EState_VSA6
+  EState_VSA7
+  EState_VSA8
+  EState_VSA9
+  VSA_EState1
+  VSA_EState10
+  VSA_EState3
+  VSA_EState4
+  VSA_EState6
+  VSA_EState7
+  VSA_EState8
+  VSA_EState9
+  FractionCSP3
+  NumAliphaticCarbocycles
+  NumAliphaticHeterocycles
+  NumHDonors
+  NumRotatableBonds
+  RingCount
+  MolLogP
+  fr_C_S
+  fr_NH0
+  fr_NH1
+  fr_allylic_oxid
+  fr_bicyclic
+  fr_ketone
+  fr_ketone_Topliss
+  fr_nitrile
+  fr_nitro_arom_nonortho
+  fr_para_hydroxylation
+  fr_pyridine
+  fr_sulfonamd

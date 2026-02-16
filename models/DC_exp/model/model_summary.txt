@@ -1,0 +1,62 @@
+============================================================
+XGBoost Hybrid Model Summary: DC_exp
+============================================================
+
+Training completed: 2026-01-23 13:37:08
+Input file: DC_exp_cleaned.csv
+Log-transformed target: False
+Training samples: 668
+Method: RFE+RandomizedSearchCV (Hybrid)
+
+----------------------------------------
+Feature Selection:
+----------------------------------------
+  Method: RFE with 3 repeats
+  Step size: 2
+  Selected features: 23
+
+----------------------------------------
+Best Hyperparameters:
+----------------------------------------
+  subsample: 0.7
+  n_estimators: 300
+  min_child_weight: 2
+  max_depth: 4
+  learning_rate: 0.1
+  colsample_bytree: 0.9
+
+----------------------------------------
+Performance Metrics:
+----------------------------------------
+5-Fold CV RMSE:        2.7371
+Test Set R²:           0.9080
+Test Set RMSE:         3.2991
+Test Set MAE:          1.2158
+80% PI Coverage:       61.2%
+
+----------------------------------------
+Selected Features (23 total):
+----------------------------------------
+  MinEStateIndex
+  MolWt
+  MaxPartialCharge
+  BCUT2D_MWHI
+  BCUT2D_CHGHI
+  BCUT2D_MRHI
+  BCUT2D_MRLOW
+  Chi0n
+  Kappa1
+  Kappa3
+  PEOE_VSA1
+  PEOE_VSA11
+  PEOE_VSA2
+  PEOE_VSA6
+  SMR_VSA1
+  SMR_VSA5
+  SlogP_VSA3
+  VSA_EState3
+  MolLogP
+  fr_Al_OH_noTert
+  fr_aldehyde
+  fr_ketone
+  fr_lactone

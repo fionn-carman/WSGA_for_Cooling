@@ -1,0 +1,75 @@
+============================================================
+XGBoost Hybrid Model Summary: MP-Measured
+============================================================
+
+Training completed: 2026-01-23 23:56:57
+Input file: MP-Measured_cleaned.csv
+Log-transformed target: False
+Training samples: 2819
+Method: RFE+RandomizedSearchCV (Hybrid)
+
+----------------------------------------
+Feature Selection:
+----------------------------------------
+  Method: RFE with 3 repeats
+  Step size: 2
+  Selected features: 36
+
+----------------------------------------
+Best Hyperparameters:
+----------------------------------------
+  subsample: 0.7
+  n_estimators: 2000
+  min_child_weight: 5
+  max_depth: 5
+  learning_rate: 0.01
+  colsample_bytree: 0.7
+
+----------------------------------------
+Performance Metrics:
+----------------------------------------
+5-Fold CV RMSE:        37.3786
+Test Set R²:           0.8993
+Test Set RMSE:         33.4123
+Test Set MAE:          24.1955
+80% PI Coverage:       67.7%
+
+----------------------------------------
+Selected Features (36 total):
+----------------------------------------
+  MinEStateIndex
+  MinPartialCharge
+  FpDensityMorgan1
+  FpDensityMorgan2
+  FpDensityMorgan3
+  BCUT2D_LOGPHI
+  BCUT2D_MRHI
+  BCUT2D_MRLOW
+  BertzCT
+  HallKierAlpha
+  Kappa3
+  PEOE_VSA1
+  PEOE_VSA2
+  PEOE_VSA6
+  PEOE_VSA8
+  SlogP_VSA2
+  SlogP_VSA8
+  TPSA
+  EState_VSA1
+  EState_VSA4
+  EState_VSA8
+  VSA_EState1
+  VSA_EState3
+  VSA_EState6
+  VSA_EState8
+  FractionCSP3
+  NOCount
+  NumAliphaticHeterocycles
+  NumRotatableBonds
+  RingCount
+  MolLogP
+  fr_COO
+  fr_bicyclic
+  fr_ester
+  fr_lactone
+  fr_para_hydroxylation

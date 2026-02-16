@@ -1,0 +1,748 @@
+========================================
+Starting HYBRID CLASSIFICATION training for: SR-MMP
+Dataset: tox21_cleaned.csv
+RandomizedSearchCV iterations: 10000
+RFE repeats: 3
+Step size: 2
+Job started at: Fri 23 Jan 10:29:52 GMT 2026
+Working directory: /rds/general/user/fc4018/projects/fionn2023/live/ML_finder/master/cleaned_training_2
+Data directory: ./data
+Output directory: ./output/tox21
+========================================
+2026-01-23 10:30:15,463 - INFO - 
+======================================================================
+2026-01-23 10:30:15,463 - INFO - LOADING DATA
+2026-01-23 10:30:15,463 - INFO - ======================================================================
+2026-01-23 10:30:15,604 - INFO - ✓ Loaded 7831 samples from tox21_cleaned.csv
+2026-01-23 10:30:15,604 - INFO - ✓ Total columns: 217
+2026-01-23 10:30:15,605 - INFO - 
+✓ Single target mode: SR-MMP
+2026-01-23 10:30:15,605 - INFO - ======================================================================
+2026-01-23 10:30:15,605 - INFO - CLASSIFICATION TRAINING: SR-MMP
+2026-01-23 10:30:15,605 - INFO - ======================================================================
+2026-01-23 10:30:15,607 - INFO - 
+STAGE 1: Preparing Data
+2026-01-23 10:30:15,607 - INFO - ----------------------------------------------------------------------
+2026-01-23 10:30:15,613 - INFO - ✓ Valid samples: 5810
+2026-01-23 10:30:15,613 - INFO -   Class distribution: 4892 negative, 918 positive (15.8% positive)
+2026-01-23 10:30:15,616 - INFO - ✓ Feature matrix: (5810, 215)
+2026-01-23 10:30:15,617 - INFO - ✓ Target shape: (5810,)
+2026-01-23 10:30:15,617 - INFO - 
+STAGE 2: Feature Selection (RFE with Repeats)
+2026-01-23 10:30:15,617 - INFO - ----------------------------------------------------------------------
+2026-01-23 10:30:15,617 - INFO - Running RFE with 3 repeats (step_size=2)...
+2026-01-23 10:30:15,617 - INFO - 
+  Repeat 1/3
+2026-01-23 10:32:23,045 - INFO -     n=213, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 10:32:23,045 - INFO -     Dropped: ['HeavyAtomCount', 'fr_imide']
+2026-01-23 10:34:28,486 - INFO -     n=211, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 10:34:28,487 - INFO -     Dropped: ['fr_azo', 'fr_lactam']
+2026-01-23 10:36:31,972 - INFO -     n=209, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 10:36:31,972 - INFO -     Dropped: ['fr_azide', 'fr_hdrzone']
+2026-01-23 10:38:33,642 - INFO -     n=207, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 10:38:33,642 - INFO -     Dropped: ['fr_amide', 'fr_benzene']
+2026-01-23 10:40:33,336 - INFO -     n=205, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 10:40:33,336 - INFO -     Dropped: ['fr_C_S', 'fr_benzodiazepine']
+2026-01-23 10:42:31,128 - INFO -     n=203, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 10:42:31,129 - INFO -     Dropped: ['fr_C_O_noCOO', 'fr_furan']
+2026-01-23 10:44:27,094 - INFO -     n=201, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 10:44:27,094 - INFO -     Dropped: ['fr_epoxide', 'fr_guanido']
+2026-01-23 10:46:21,179 - INFO -     n=199, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 10:46:21,179 - INFO -     Dropped: ['SMR_VSA2', 'fr_methoxy']
+2026-01-23 10:48:13,350 - INFO -     n=197, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 10:48:13,350 - INFO -     Dropped: ['fr_hdrzine', 'fr_morpholine']
+2026-01-23 10:50:03,713 - INFO -     n=195, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 10:50:03,714 - INFO -     Dropped: ['NumAromaticHeterocycles', 'fr_imidazole']
+2026-01-23 10:51:52,153 - INFO -     n=193, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 10:51:52,153 - INFO -     Dropped: ['fr_aldehyde', 'fr_isocyan']
+2026-01-23 10:53:38,702 - INFO -     n=191, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 10:53:38,702 - INFO -     Dropped: ['fr_SH', 'fr_alkyl_halide']
+2026-01-23 10:55:23,428 - INFO -     n=189, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 10:55:23,428 - INFO -     Dropped: ['fr_Nhpyrrole', 'fr_alkyl_carbamate']
+2026-01-23 10:57:06,316 - INFO -     n=187, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 10:57:06,316 - INFO -     Dropped: ['NumRadicalElectrons', 'fr_N_O']
+2026-01-23 10:58:50,491 - INFO -     n=185, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 10:58:50,492 - INFO -     Dropped: ['EState_VSA11', 'fr_NH2']
+2026-01-23 11:00:31,928 - INFO -     n=183, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:00:31,928 - INFO -     Dropped: ['fr_amidine', 'fr_aryl_methyl']
+2026-01-23 11:02:09,317 - INFO -     n=181, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:02:09,317 - INFO -     Dropped: ['fr_Ar_COO', 'fr_nitroso']
+2026-01-23 11:03:44,843 - INFO -     n=179, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:03:44,843 - INFO -     Dropped: ['fr_Ar_NH', 'fr_oxazole']
+2026-01-23 11:05:18,552 - INFO -     n=177, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:05:18,552 - INFO -     Dropped: ['fr_Imine', 'fr_piperdine']
+2026-01-23 11:06:50,443 - INFO -     n=175, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:06:50,444 - INFO -     Dropped: ['fr_phos_acid', 'fr_phos_ester']
+2026-01-23 11:08:20,497 - INFO -     n=173, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:08:20,498 - INFO -     Dropped: ['fr_HOCCN', 'fr_oxime']
+2026-01-23 11:09:48,743 - INFO -     n=171, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:09:48,744 - INFO -     Dropped: ['fr_ketone_Topliss', 'fr_piperzine']
+2026-01-23 11:11:15,266 - INFO -     n=169, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:11:15,266 - INFO -     Dropped: ['fr_nitrile', 'fr_sulfide']
+2026-01-23 11:12:39,922 - INFO -     n=167, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:12:39,923 - INFO -     Dropped: ['fr_dihydropyridine', 'fr_lactone']
+2026-01-23 11:14:02,785 - INFO -     n=165, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:14:02,785 - INFO -     Dropped: ['NumSaturatedRings', 'fr_barbitur']
+2026-01-23 11:15:23,972 - INFO -     n=163, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:15:23,972 - INFO -     Dropped: ['MaxAbsEStateIndex', 'fr_isothiocyan']
+2026-01-23 11:16:43,390 - INFO -     n=161, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:16:43,391 - INFO -     Dropped: ['fr_priamide', 'fr_quatN']
+2026-01-23 11:18:00,883 - INFO -     n=159, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:18:00,884 - INFO -     Dropped: ['fr_thiocyan', 'fr_thiophene']
+2026-01-23 11:19:16,630 - INFO -     n=157, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:19:16,630 - INFO -     Dropped: ['fr_tetrazole', 'fr_thiazole']
+2026-01-23 11:20:30,617 - INFO -     n=155, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:20:30,617 - INFO -     Dropped: ['fr_sulfone', 'fr_term_acetylene']
+2026-01-23 11:21:42,850 - INFO -     n=153, AUC=0.9467, Acc=0.9269, F1=0.7522
+2026-01-23 11:21:42,851 - INFO -     Dropped: ['NumSaturatedCarbocycles', 'fr_pyridine']
+2026-01-23 11:22:53,302 - INFO -     n=151, AUC=0.9468, Acc=0.9269, F1=0.7522
+2026-01-23 11:22:53,302 - INFO -     Dropped: ['NumValenceElectrons', 'fr_ester']
+2026-01-23 11:24:02,008 - INFO -     n=149, AUC=0.9491, Acc=0.9243, F1=0.7412
+2026-01-23 11:24:02,008 - INFO -     Dropped: ['NR-AR', 'RingCount']
+2026-01-23 11:25:09,040 - INFO -     n=147, AUC=0.9473, Acc=0.9208, F1=0.7356
+2026-01-23 11:25:09,040 - INFO -     Dropped: ['SR-HSE', 'ExactMolWt']
+2026-01-23 11:26:14,317 - INFO -     n=145, AUC=0.9473, Acc=0.9208, F1=0.7356
+2026-01-23 11:26:14,317 - INFO -     Dropped: ['fr_phenol', 'fr_urea']
+2026-01-23 11:27:17,922 - INFO -     n=143, AUC=0.9473, Acc=0.9208, F1=0.7356
+2026-01-23 11:27:17,922 - INFO -     Dropped: ['fr_Al_OH', 'fr_ketone']
+2026-01-23 11:28:19,890 - INFO -     n=141, AUC=0.9473, Acc=0.9208, F1=0.7356
+2026-01-23 11:28:19,890 - INFO -     Dropped: ['NumAliphaticRings', 'fr_Al_OH_noTert']
+2026-01-23 11:29:20,149 - INFO -     n=139, AUC=0.9484, Acc=0.9217, F1=0.7362
+2026-01-23 11:29:20,149 - INFO -     Dropped: ['NHOHCount', 'fr_C_O']
+2026-01-23 11:30:18,777 - INFO -     n=137, AUC=0.9469, Acc=0.9217, F1=0.7362
+2026-01-23 11:30:18,777 - INFO -     Dropped: ['SlogP_VSA12', 'NumAliphaticCarbocycles']
+2026-01-23 11:31:15,761 - INFO -     n=135, AUC=0.9465, Acc=0.9217, F1=0.7362
+2026-01-23 11:31:15,762 - INFO -     Dropped: ['NumAromaticRings', 'fr_para_hydroxylation']
+2026-01-23 11:32:11,047 - INFO -     n=133, AUC=0.9487, Acc=0.9217, F1=0.7347
+2026-01-23 11:32:11,047 - INFO -     Dropped: ['Chi2n', 'fr_bicyclic']
+2026-01-23 11:33:04,710 - INFO -     n=131, AUC=0.9487, Acc=0.9217, F1=0.7347
+2026-01-23 11:33:04,711 - INFO -     Dropped: ['fr_Ndealkylation1', 'fr_unbrch_alkane']
+2026-01-23 11:33:56,753 - INFO -     n=129, AUC=0.9443, Acc=0.9234, F1=0.7390
+2026-01-23 11:33:56,753 - INFO -     Dropped: ['Chi0n', 'VSA_EState6']
+2026-01-23 11:34:47,174 - INFO -     n=127, AUC=0.9494, Acc=0.9234, F1=0.7435
+2026-01-23 11:34:47,174 - INFO -     Dropped: ['SlogP_VSA8', 'EState_VSA7']
+2026-01-23 11:35:36,023 - INFO -     n=125, AUC=0.9456, Acc=0.9225, F1=0.7399
+2026-01-23 11:35:36,024 - INFO -     Dropped: ['NumAliphaticHeterocycles', 'fr_sulfonamd']
+2026-01-23 11:36:23,341 - INFO -     n=123, AUC=0.9483, Acc=0.9269, F1=0.7536
+2026-01-23 11:36:23,341 - INFO -     Dropped: ['Ipc', 'NumRotatableBonds']
+2026-01-23 11:37:09,070 - INFO -     n=121, AUC=0.9467, Acc=0.9251, F1=0.7493
+2026-01-23 11:37:09,071 - INFO -     Dropped: ['PEOE_VSA14', 'NumHDonors']
+2026-01-23 11:37:53,266 - INFO -     n=119, AUC=0.9492, Acc=0.9234, F1=0.7375
+2026-01-23 11:37:53,267 - INFO -     Dropped: ['MinAbsEStateIndex', 'PEOE_VSA4']
+2026-01-23 11:38:35,947 - INFO -     n=117, AUC=0.9466, Acc=0.9225, F1=0.7384
+2026-01-23 11:38:35,947 - INFO -     Dropped: ['LabuteASA', 'fr_NH0']
+2026-01-23 11:39:17,168 - INFO -     n=115, AUC=0.9484, Acc=0.9251, F1=0.7507
+2026-01-23 11:39:17,168 - INFO -     Dropped: ['Chi3n', 'SMR_VSA9']
+2026-01-23 11:39:56,891 - INFO -     n=113, AUC=0.9451, Acc=0.9234, F1=0.7479
+2026-01-23 11:39:56,891 - INFO -     Dropped: ['TPSA', 'fr_allylic_oxid']
+2026-01-23 11:40:35,207 - INFO -     n=111, AUC=0.9455, Acc=0.9303, F1=0.7596
+2026-01-23 11:40:35,207 - INFO -     Dropped: ['EState_VSA9', 'NumHAcceptors']
+2026-01-23 11:41:12,083 - INFO -     n=109, AUC=0.9423, Acc=0.9234, F1=0.7450
+2026-01-23 11:41:12,083 - INFO -     Dropped: ['Chi0', 'VSA_EState2']
+2026-01-23 11:41:47,542 - INFO -     n=107, AUC=0.9455, Acc=0.9208, F1=0.7310
+2026-01-23 11:41:47,542 - INFO -     Dropped: ['MinAbsPartialCharge', 'VSA_EState10']
+2026-01-23 11:42:21,640 - INFO -     n=105, AUC=0.9486, Acc=0.9260, F1=0.7485
+2026-01-23 11:42:21,641 - INFO -     Dropped: ['NumHeteroatoms', 'fr_aniline']
+2026-01-23 11:42:54,413 - INFO -     n=103, AUC=0.9488, Acc=0.9182, F1=0.7293
+2026-01-23 11:42:54,413 - INFO -     Dropped: ['BCUT2D_MWHI', 'fr_COO2']
+2026-01-23 11:43:25,861 - INFO -     n=101, AUC=0.9482, Acc=0.9225, F1=0.7414
+2026-01-23 11:43:25,861 - INFO -     Dropped: ['Chi1', 'PEOE_VSA2']
+2026-01-23 11:43:55,980 - INFO -     n=99, AUC=0.9482, Acc=0.9269, F1=0.7578
+2026-01-23 11:43:55,981 - INFO -     Dropped: ['Kappa3', 'PEOE_VSA10']
+2026-01-23 11:44:24,826 - INFO -     n=97, AUC=0.9458, Acc=0.9217, F1=0.7362
+2026-01-23 11:44:24,826 - INFO -     Dropped: ['SMR_VSA7', 'SlogP_VSA4']
+2026-01-23 11:44:52,422 - INFO -     n=95, AUC=0.9449, Acc=0.9269, F1=0.7493
+2026-01-23 11:44:52,422 - INFO -     Dropped: ['qed', 'PEOE_VSA7']
+2026-01-23 11:45:18,807 - INFO -     n=93, AUC=0.9467, Acc=0.9312, F1=0.7661
+2026-01-23 11:45:18,807 - INFO -     Dropped: ['PEOE_VSA11', 'PEOE_VSA8']
+2026-01-23 11:45:43,982 - INFO -     n=91, AUC=0.9491, Acc=0.9243, F1=0.7396
+2026-01-23 11:45:43,982 - INFO -     Dropped: ['MolWt', 'Chi3v']
+2026-01-23 11:46:08,012 - INFO -     n=89, AUC=0.9501, Acc=0.9182, F1=0.7246
+2026-01-23 11:46:08,012 - INFO -     Dropped: ['MaxEStateIndex', 'PEOE_VSA6']
+2026-01-23 11:46:30,935 - INFO -     n=87, AUC=0.9494, Acc=0.9260, F1=0.7500
+2026-01-23 11:46:30,935 - INFO -     Dropped: ['Kappa2', 'fr_halogen']
+2026-01-23 11:46:52,802 - INFO -     n=85, AUC=0.9520, Acc=0.9251, F1=0.7493
+2026-01-23 11:46:52,802 - INFO -     Dropped: ['PEOE_VSA1', 'SlogP_VSA7']
+2026-01-23 11:47:13,589 - INFO -     n=83, AUC=0.9482, Acc=0.9234, F1=0.7420
+2026-01-23 11:47:13,589 - INFO -     Dropped: ['BCUT2D_MWLOW', 'PEOE_VSA12']
+2026-01-23 11:47:33,356 - INFO -     n=81, AUC=0.9468, Acc=0.9200, F1=0.7335
+2026-01-23 11:47:33,357 - INFO -     Dropped: ['Chi0v', 'EState_VSA1']
+2026-01-23 11:47:52,078 - INFO -     n=79, AUC=0.9438, Acc=0.9208, F1=0.7341
+2026-01-23 11:47:52,078 - INFO -     Dropped: ['FpDensityMorgan3', 'BCUT2D_LOGPLOW']
+2026-01-23 11:48:09,823 - INFO -     n=77, AUC=0.9455, Acc=0.9251, F1=0.7493
+2026-01-23 11:48:09,823 - INFO -     Dropped: ['BalabanJ', 'fr_ether']
+2026-01-23 11:48:26,612 - INFO -     n=75, AUC=0.9465, Acc=0.9243, F1=0.7471
+2026-01-23 11:48:26,612 - INFO -     Dropped: ['EState_VSA3', 'NOCount']
+2026-01-23 11:48:42,482 - INFO -     n=73, AUC=0.9431, Acc=0.9174, F1=0.7257
+2026-01-23 11:48:42,482 - INFO -     Dropped: ['PEOE_VSA9', 'VSA_EState4']
+2026-01-23 11:48:57,435 - INFO -     n=71, AUC=0.9429, Acc=0.9208, F1=0.7326
+2026-01-23 11:48:57,435 - INFO -     Dropped: ['SMR_VSA4', 'EState_VSA8']
+2026-01-23 11:49:11,506 - INFO -     n=69, AUC=0.9469, Acc=0.9269, F1=0.7550
+2026-01-23 11:49:11,506 - INFO -     Dropped: ['Chi4v', 'EState_VSA2']
+2026-01-23 11:49:24,727 - INFO -     n=67, AUC=0.9480, Acc=0.9217, F1=0.7393
+2026-01-23 11:49:24,728 - INFO -     Dropped: ['SlogP_VSA5', 'VSA_EState8']
+2026-01-23 11:49:37,125 - INFO -     n=65, AUC=0.9460, Acc=0.9208, F1=0.7401
+2026-01-23 11:49:37,125 - INFO -     Dropped: ['BCUT2D_MRHI', 'EState_VSA4']
+2026-01-23 11:49:48,730 - INFO -     n=63, AUC=0.9451, Acc=0.9243, F1=0.7500
+2026-01-23 11:49:48,730 - INFO -     Dropped: ['PEOE_VSA3', 'PEOE_VSA5']
+2026-01-23 11:49:59,565 - INFO -     n=61, AUC=0.9463, Acc=0.9243, F1=0.7514
+2026-01-23 11:49:59,565 - INFO -     Dropped: ['FpDensityMorgan1', 'VSA_EState1']
+2026-01-23 11:50:09,646 - INFO -     n=59, AUC=0.9455, Acc=0.9277, F1=0.7627
+2026-01-23 11:50:09,646 - INFO -     Dropped: ['Chi1n', 'VSA_EState5']
+2026-01-23 11:50:19,004 - INFO -     n=57, AUC=0.9456, Acc=0.9225, F1=0.7472
+2026-01-23 11:50:19,004 - INFO -     Dropped: ['BCUT2D_CHGHI', 'Chi2v']
+2026-01-23 11:50:27,664 - INFO -     n=55, AUC=0.9441, Acc=0.9208, F1=0.7356
+2026-01-23 11:50:27,665 - INFO -     Dropped: ['MaxAbsPartialCharge', 'HallKierAlpha']
+2026-01-23 11:50:35,673 - INFO -     n=53, AUC=0.9475, Acc=0.9260, F1=0.7557
+2026-01-23 11:50:35,673 - INFO -     Dropped: ['HeavyAtomMolWt', 'SlogP_VSA1']
+2026-01-23 11:50:43,094 - INFO -     n=51, AUC=0.9498, Acc=0.9286, F1=0.7649
+2026-01-23 11:50:43,094 - INFO -     Dropped: ['fr_NH1', 'fr_Ndealkylation2']
+2026-01-23 11:50:49,917 - INFO -     n=49, AUC=0.9443, Acc=0.9200, F1=0.7395
+2026-01-23 11:50:49,917 - INFO -     Dropped: ['SMR_VSA1', 'SlogP_VSA3']
+2026-01-23 11:50:56,150 - INFO -     n=47, AUC=0.9436, Acc=0.9217, F1=0.7422
+2026-01-23 11:50:56,150 - INFO -     Dropped: ['BCUT2D_MRLOW', 'SMR_VSA5']
+2026-01-23 11:51:01,840 - INFO -     n=45, AUC=0.9425, Acc=0.9148, F1=0.7227
+2026-01-23 11:51:01,841 - INFO -     Dropped: ['SlogP_VSA11', 'fr_Ar_N']
+2026-01-23 11:51:07,007 - INFO -     n=43, AUC=0.9437, Acc=0.9217, F1=0.7407
+2026-01-23 11:51:07,007 - INFO -     Dropped: ['MinPartialCharge', 'EState_VSA5']
+2026-01-23 11:51:11,656 - INFO -     n=41, AUC=0.9489, Acc=0.9243, F1=0.7500
+2026-01-23 11:51:11,656 - INFO -     Dropped: ['MinEStateIndex', 'VSA_EState7']
+2026-01-23 11:51:15,827 - INFO -     n=39, AUC=0.9430, Acc=0.9234, F1=0.7507
+2026-01-23 11:51:15,828 - INFO -     Dropped: ['Chi4n', 'EState_VSA6']
+2026-01-23 11:51:19,554 - INFO -     n=37, AUC=0.9444, Acc=0.9200, F1=0.7365
+2026-01-23 11:51:19,555 - INFO -     Dropped: ['BCUT2D_CHGLO', 'SMR_VSA10']
+2026-01-23 11:51:22,869 - INFO -     n=35, AUC=0.9471, Acc=0.9148, F1=0.7227
+2026-01-23 11:51:22,869 - INFO -     Dropped: ['MaxPartialCharge', 'SlogP_VSA6']
+2026-01-23 11:51:25,797 - INFO -     n=33, AUC=0.9458, Acc=0.9182, F1=0.7309
+2026-01-23 11:51:25,798 - INFO -     Dropped: ['FpDensityMorgan2', 'EState_VSA10']
+2026-01-23 11:51:28,379 - INFO -     n=31, AUC=0.9418, Acc=0.9079, F1=0.6986
+2026-01-23 11:51:28,379 - INFO -     Dropped: ['BertzCT', 'fr_nitro_arom']
+2026-01-23 11:51:30,630 - INFO -     n=29, AUC=0.9403, Acc=0.9139, F1=0.7238
+2026-01-23 11:51:30,630 - INFO -     Dropped: ['Kappa1', 'MolMR']
+2026-01-23 11:51:32,577 - INFO -     n=27, AUC=0.9358, Acc=0.9122, F1=0.7119
+2026-01-23 11:51:32,578 - INFO -     Dropped: ['BCUT2D_LOGPHI', 'Chi1v']
+2026-01-23 11:51:34,262 - INFO -     n=25, AUC=0.9345, Acc=0.9131, F1=0.7171
+2026-01-23 11:51:34,263 - INFO -     Dropped: ['PEOE_VSA13', 'VSA_EState3']
+2026-01-23 11:51:35,735 - INFO -     n=23, AUC=0.9326, Acc=0.9139, F1=0.7143
+2026-01-23 11:51:35,735 - INFO -     Dropped: ['VSA_EState9', 'fr_ArN']
+2026-01-23 11:51:36,997 - INFO -     n=21, AUC=0.9248, Acc=0.9165, F1=0.7221
+2026-01-23 11:51:36,998 - INFO -     Dropped: ['SlogP_VSA2', 'FractionCSP3']
+2026-01-23 11:51:38,072 - INFO -     n=19, AUC=0.9164, Acc=0.9096, F1=0.7009
+2026-01-23 11:51:38,072 - INFO -     Dropped: ['NR-AR-LBD', 'SMR_VSA6']
+2026-01-23 11:51:38,995 - INFO -     n=17, AUC=0.9104, Acc=0.9002, F1=0.6705
+2026-01-23 11:51:38,995 - INFO -     Dropped: ['SMR_VSA3', 'SlogP_VSA10']
+2026-01-23 11:51:39,771 - INFO -     n=15, AUC=0.8843, Acc=0.8830, F1=0.6114
+2026-01-23 11:51:39,772 - INFO -     Dropped: ['MolLogP', 'fr_nitro_arom_nonortho']
+2026-01-23 11:51:40,426 - INFO -     n=13, AUC=0.8830, Acc=0.8864, F1=0.6374
+2026-01-23 11:51:40,427 - INFO -     Dropped: ['SR-ATAD5', 'NumSaturatedHeterocycles']
+2026-01-23 11:51:40,978 - INFO -     n=11, AUC=0.8841, Acc=0.8916, F1=0.6316
+2026-01-23 11:51:40,978 - INFO -     Dropped: ['NR-ER-LBD', 'NumAromaticCarbocycles']
+2026-01-23 11:51:41,429 - INFO -     n=9, AUC=0.8656, Acc=0.8941, F1=0.6455
+2026-01-23 11:51:41,429 - INFO -     Dropped: ['NR-PPAR-gamma', 'fr_nitro']
+2026-01-23 11:51:41,787 - INFO -     n=7, AUC=0.8672, Acc=0.8924, F1=0.6398
+2026-01-23 11:51:41,788 - INFO -     Dropped: ['NR-ER', 'fr_phenol_noOrthoHbond']
+2026-01-23 11:51:42,052 - INFO -     n=5, AUC=0.8593, Acc=0.8907, F1=0.6044
+2026-01-23 11:51:42,052 - INFO -     Dropped: ['SR-ARE', 'fr_Al_COO']
+2026-01-23 11:51:42,213 - INFO -     n=3, AUC=0.8481, Acc=0.8907, F1=0.6231
+2026-01-23 11:51:42,213 - INFO -     Dropped: ['fr_Ar_OH', 'fr_COO']
+2026-01-23 11:51:42,292 - INFO -     n=1, AUC=0.7424, Acc=0.8873, F1=0.5969
+2026-01-23 11:51:42,292 - INFO -     Dropped: ['NR-AhR', 'NR-Aromatase']
+2026-01-23 11:51:42,293 - INFO -   → Best for repeat 1: 85 features, AUC=0.9520
+2026-01-23 11:51:42,293 - INFO - 
+  Repeat 2/3
+2026-01-23 11:53:48,624 - INFO -     n=213, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 11:53:48,625 - INFO -     Dropped: ['fr_dihydropyridine', 'fr_epoxide']
+2026-01-23 11:55:53,038 - INFO -     n=211, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 11:55:53,038 - INFO -     Dropped: ['fr_Ar_COO', 'fr_ester']
+2026-01-23 11:57:55,536 - INFO -     n=209, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 11:57:55,537 - INFO -     Dropped: ['fr_benzene', 'fr_nitroso']
+2026-01-23 11:59:56,134 - INFO -     n=207, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 11:59:56,134 - INFO -     Dropped: ['fr_barbitur', 'fr_oxime']
+2026-01-23 12:01:54,795 - INFO -     n=205, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:01:54,795 - INFO -     Dropped: ['fr_morpholine', 'fr_oxazole']
+2026-01-23 12:03:51,575 - INFO -     n=203, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:03:51,575 - INFO -     Dropped: ['EState_VSA11', 'fr_hdrzone']
+2026-01-23 12:05:46,455 - INFO -     n=201, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:05:46,455 - INFO -     Dropped: ['NumSaturatedRings', 'fr_amidine']
+2026-01-23 12:07:41,871 - INFO -     n=199, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:07:41,871 - INFO -     Dropped: ['fr_Al_OH', 'fr_priamide']
+2026-01-23 12:09:36,255 - INFO -     n=197, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:09:36,256 - INFO -     Dropped: ['fr_Al_OH_noTert', 'fr_nitrile']
+2026-01-23 12:11:28,125 - INFO -     n=195, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:11:28,125 - INFO -     Dropped: ['fr_alkyl_carbamate', 'fr_ether']
+2026-01-23 12:13:18,021 - INFO -     n=193, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:13:18,021 - INFO -     Dropped: ['fr_SH', 'fr_aldehyde']
+2026-01-23 12:15:05,966 - INFO -     n=191, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:15:05,966 - INFO -     Dropped: ['fr_Ndealkylation2', 'fr_Nhpyrrole']
+2026-01-23 12:16:52,122 - INFO -     n=189, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:16:52,122 - INFO -     Dropped: ['SMR_VSA2', 'fr_phos_acid']
+2026-01-23 12:18:36,251 - INFO -     n=187, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:18:36,252 - INFO -     Dropped: ['fr_NH2', 'fr_N_O']
+2026-01-23 12:20:18,550 - INFO -     n=185, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:20:18,550 - INFO -     Dropped: ['fr_ketone', 'fr_ketone_Topliss']
+2026-01-23 12:21:58,867 - INFO -     n=183, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:21:58,867 - INFO -     Dropped: ['fr_lactam', 'fr_phos_ester']
+2026-01-23 12:23:37,412 - INFO -     n=181, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:23:37,412 - INFO -     Dropped: ['ExactMolWt', 'fr_Ar_NH']
+2026-01-23 12:25:14,142 - INFO -     n=179, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:25:14,142 - INFO -     Dropped: ['HeavyAtomCount', 'fr_furan']
+2026-01-23 12:26:48,854 - INFO -     n=177, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:26:48,854 - INFO -     Dropped: ['fr_C_O', 'fr_quatN']
+2026-01-23 12:28:21,761 - INFO -     n=175, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:28:21,762 - INFO -     Dropped: ['fr_aryl_methyl', 'fr_azo']
+2026-01-23 12:29:52,967 - INFO -     n=173, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:29:52,967 - INFO -     Dropped: ['fr_benzodiazepine', 'fr_isocyan']
+2026-01-23 12:31:22,308 - INFO -     n=171, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:31:22,308 - INFO -     Dropped: ['fr_isothiocyan', 'fr_piperzine']
+2026-01-23 12:32:49,780 - INFO -     n=169, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:32:49,780 - INFO -     Dropped: ['fr_HOCCN', 'fr_imide']
+2026-01-23 12:34:15,488 - INFO -     n=167, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:34:15,488 - INFO -     Dropped: ['MaxAbsEStateIndex', 'fr_hdrzine']
+2026-01-23 12:35:39,274 - INFO -     n=165, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:35:39,274 - INFO -     Dropped: ['NumAromaticRings', 'fr_azide']
+2026-01-23 12:37:01,222 - INFO -     n=163, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:37:01,222 - INFO -     Dropped: ['fr_thiocyan', 'fr_thiophene']
+2026-01-23 12:38:21,509 - INFO -     n=161, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:38:21,509 - INFO -     Dropped: ['fr_C_S', 'fr_guanido']
+2026-01-23 12:39:39,951 - INFO -     n=159, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:39:39,952 - INFO -     Dropped: ['fr_lactone', 'fr_tetrazole']
+2026-01-23 12:40:56,535 - INFO -     n=157, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:40:56,535 - INFO -     Dropped: ['fr_sulfone', 'fr_term_acetylene']
+2026-01-23 12:42:11,291 - INFO -     n=155, AUC=0.9629, Acc=0.9312, F1=0.7661
+2026-01-23 12:42:11,292 - INFO -     Dropped: ['NumRadicalElectrons', 'fr_sulfonamd']
+2026-01-23 12:43:24,380 - INFO -     n=153, AUC=0.9641, Acc=0.9303, F1=0.7652
+2026-01-23 12:43:24,380 - INFO -     Dropped: ['fr_methoxy', 'fr_sulfide']
+2026-01-23 12:44:35,626 - INFO -     n=151, AUC=0.9635, Acc=0.9286, F1=0.7594
+2026-01-23 12:44:35,627 - INFO -     Dropped: ['NumValenceElectrons', 'NumSaturatedCarbocycles']
+2026-01-23 12:45:45,058 - INFO -     n=149, AUC=0.9618, Acc=0.9320, F1=0.7697
+2026-01-23 12:45:45,058 - INFO -     Dropped: ['Chi1n', 'NumAliphaticRings']
+2026-01-23 12:46:52,822 - INFO -     n=147, AUC=0.9665, Acc=0.9312, F1=0.7619
+2026-01-23 12:46:52,822 - INFO -     Dropped: ['Chi2n', 'fr_phenol']
+2026-01-23 12:47:58,839 - INFO -     n=145, AUC=0.9665, Acc=0.9312, F1=0.7619
+2026-01-23 12:47:58,840 - INFO -     Dropped: ['fr_C_O_noCOO', 'fr_imidazole']
+2026-01-23 12:49:03,565 - INFO -     n=143, AUC=0.9628, Acc=0.9312, F1=0.7688
+2026-01-23 12:49:03,566 - INFO -     Dropped: ['PEOE_VSA5', 'fr_allylic_oxid']
+2026-01-23 12:50:07,372 - INFO -     n=141, AUC=0.9628, Acc=0.9312, F1=0.7688
+2026-01-23 12:50:07,373 - INFO -     Dropped: ['SlogP_VSA12', 'fr_thiazole']
+2026-01-23 12:51:09,556 - INFO -     n=139, AUC=0.9641, Acc=0.9312, F1=0.7701
+2026-01-23 12:51:09,557 - INFO -     Dropped: ['NumHAcceptors', 'fr_NH1']
+2026-01-23 12:52:09,895 - INFO -     n=137, AUC=0.9634, Acc=0.9303, F1=0.7652
+2026-01-23 12:52:09,895 - INFO -     Dropped: ['SlogP_VSA7', 'fr_Ndealkylation1']
+2026-01-23 12:53:08,630 - INFO -     n=135, AUC=0.9624, Acc=0.9303, F1=0.7625
+2026-01-23 12:53:08,630 - INFO -     Dropped: ['PEOE_VSA4', 'fr_halogen']
+2026-01-23 12:54:05,723 - INFO -     n=133, AUC=0.9664, Acc=0.9294, F1=0.7602
+2026-01-23 12:54:05,723 - INFO -     Dropped: ['Chi4n', 'fr_urea']
+2026-01-23 12:55:01,272 - INFO -     n=131, AUC=0.9678, Acc=0.9346, F1=0.7778
+2026-01-23 12:55:01,272 - INFO -     Dropped: ['RingCount', 'fr_unbrch_alkane']
+2026-01-23 12:55:54,918 - INFO -     n=129, AUC=0.9690, Acc=0.9320, F1=0.7697
+2026-01-23 12:55:54,918 - INFO -     Dropped: ['VSA_EState1', 'fr_para_hydroxylation']
+2026-01-23 12:56:46,988 - INFO -     n=127, AUC=0.9673, Acc=0.9337, F1=0.7729
+2026-01-23 12:56:46,989 - INFO -     Dropped: ['SMR_VSA1', 'fr_Imine']
+2026-01-23 12:57:37,246 - INFO -     n=125, AUC=0.9642, Acc=0.9312, F1=0.7661
+2026-01-23 12:57:37,246 - INFO -     Dropped: ['NOCount', 'fr_pyridine']
+2026-01-23 12:58:25,825 - INFO -     n=123, AUC=0.9657, Acc=0.9286, F1=0.7566
+2026-01-23 12:58:25,826 - INFO -     Dropped: ['PEOE_VSA7', 'fr_bicyclic']
+2026-01-23 12:59:12,867 - INFO -     n=121, AUC=0.9655, Acc=0.9294, F1=0.7602
+2026-01-23 12:59:12,867 - INFO -     Dropped: ['Chi0', 'NumAliphaticHeterocycles']
+2026-01-23 12:59:58,425 - INFO -     n=119, AUC=0.9653, Acc=0.9312, F1=0.7633
+2026-01-23 12:59:58,425 - INFO -     Dropped: ['Chi3v', 'EState_VSA2']
+2026-01-23 13:00:42,368 - INFO -     n=117, AUC=0.9641, Acc=0.9269, F1=0.7507
+2026-01-23 13:00:42,368 - INFO -     Dropped: ['SlogP_VSA8', 'fr_alkyl_halide']
+2026-01-23 13:01:24,763 - INFO -     n=115, AUC=0.9620, Acc=0.9337, F1=0.7729
+2026-01-23 13:01:24,764 - INFO -     Dropped: ['Chi0n', 'SMR_VSA4']
+2026-01-23 13:02:05,646 - INFO -     n=113, AUC=0.9655, Acc=0.9355, F1=0.7774
+2026-01-23 13:02:05,647 - INFO -     Dropped: ['SR-HSE', 'Chi0v']
+2026-01-23 13:02:44,893 - INFO -     n=111, AUC=0.9627, Acc=0.9320, F1=0.7670
+2026-01-23 13:02:44,893 - INFO -     Dropped: ['Kappa1', 'NumAromaticHeterocycles']
+2026-01-23 13:03:22,834 - INFO -     n=109, AUC=0.9643, Acc=0.9346, F1=0.7725
+2026-01-23 13:03:22,834 - INFO -     Dropped: ['NR-AR', 'VSA_EState6']
+2026-01-23 13:03:59,065 - INFO -     n=107, AUC=0.9658, Acc=0.9363, F1=0.7836
+2026-01-23 13:03:59,066 - INFO -     Dropped: ['Kappa2', 'EState_VSA8']
+2026-01-23 13:04:34,129 - INFO -     n=105, AUC=0.9657, Acc=0.9337, F1=0.7701
+2026-01-23 13:04:34,129 - INFO -     Dropped: ['Kappa3', 'EState_VSA7']
+2026-01-23 13:05:07,721 - INFO -     n=103, AUC=0.9651, Acc=0.9286, F1=0.7566
+2026-01-23 13:05:07,721 - INFO -     Dropped: ['PEOE_VSA10', 'EState_VSA3']
+2026-01-23 13:05:39,880 - INFO -     n=101, AUC=0.9639, Acc=0.9294, F1=0.7588
+2026-01-23 13:05:39,880 - INFO -     Dropped: ['Chi1v', 'NHOHCount']
+2026-01-23 13:06:10,785 - INFO -     n=99, AUC=0.9667, Acc=0.9355, F1=0.7826
+2026-01-23 13:06:10,786 - INFO -     Dropped: ['PEOE_VSA8', 'NumRotatableBonds']
+2026-01-23 13:06:40,497 - INFO -     n=97, AUC=0.9651, Acc=0.9312, F1=0.7619
+2026-01-23 13:06:40,497 - INFO -     Dropped: ['MinAbsEStateIndex', 'MinAbsPartialCharge']
+2026-01-23 13:07:08,890 - INFO -     n=95, AUC=0.9636, Acc=0.9372, F1=0.7847
+2026-01-23 13:07:08,890 - INFO -     Dropped: ['FpDensityMorgan3', 'PEOE_VSA9']
+2026-01-23 13:07:36,036 - INFO -     n=93, AUC=0.9640, Acc=0.9294, F1=0.7616
+2026-01-23 13:07:36,036 - INFO -     Dropped: ['BCUT2D_LOGPLOW', 'Chi3n']
+2026-01-23 13:08:01,965 - INFO -     n=91, AUC=0.9634, Acc=0.9303, F1=0.7652
+2026-01-23 13:08:01,965 - INFO -     Dropped: ['TPSA', 'VSA_EState5']
+2026-01-23 13:08:26,675 - INFO -     n=89, AUC=0.9618, Acc=0.9372, F1=0.7859
+2026-01-23 13:08:26,675 - INFO -     Dropped: ['VSA_EState8', 'NumAliphaticCarbocycles']
+2026-01-23 13:08:50,135 - INFO -     n=87, AUC=0.9633, Acc=0.9312, F1=0.7647
+2026-01-23 13:08:50,136 - INFO -     Dropped: ['Chi2v', 'PEOE_VSA3']
+2026-01-23 13:09:12,502 - INFO -     n=85, AUC=0.9590, Acc=0.9346, F1=0.7751
+2026-01-23 13:09:12,503 - INFO -     Dropped: ['SMR_VSA10', 'EState_VSA9']
+2026-01-23 13:09:33,723 - INFO -     n=83, AUC=0.9622, Acc=0.9303, F1=0.7638
+2026-01-23 13:09:33,724 - INFO -     Dropped: ['MaxPartialCharge', 'fr_Ar_OH']
+2026-01-23 13:09:54,054 - INFO -     n=81, AUC=0.9621, Acc=0.9294, F1=0.7630
+2026-01-23 13:09:54,054 - INFO -     Dropped: ['SlogP_VSA3', 'fr_COO2']
+2026-01-23 13:10:13,383 - INFO -     n=79, AUC=0.9607, Acc=0.9337, F1=0.7781
+2026-01-23 13:10:13,383 - INFO -     Dropped: ['MaxEStateIndex', 'SlogP_VSA5']
+2026-01-23 13:10:31,674 - INFO -     n=77, AUC=0.9619, Acc=0.9337, F1=0.7768
+2026-01-23 13:10:31,675 - INFO -     Dropped: ['MaxAbsPartialCharge', 'fr_amide']
+2026-01-23 13:10:48,863 - INFO -     n=75, AUC=0.9620, Acc=0.9329, F1=0.7733
+2026-01-23 13:10:48,864 - INFO -     Dropped: ['MinEStateIndex', 'PEOE_VSA1']
+2026-01-23 13:11:05,241 - INFO -     n=73, AUC=0.9618, Acc=0.9277, F1=0.7558
+2026-01-23 13:11:05,242 - INFO -     Dropped: ['BalabanJ', 'fr_NH0']
+2026-01-23 13:11:20,682 - INFO -     n=71, AUC=0.9587, Acc=0.9277, F1=0.7544
+2026-01-23 13:11:20,682 - INFO -     Dropped: ['HeavyAtomMolWt', 'BCUT2D_MWLOW']
+2026-01-23 13:11:35,196 - INFO -     n=69, AUC=0.9645, Acc=0.9380, F1=0.7882
+2026-01-23 13:11:35,197 - INFO -     Dropped: ['Chi4v', 'NumHDonors']
+2026-01-23 13:11:48,880 - INFO -     n=67, AUC=0.9610, Acc=0.9294, F1=0.7602
+2026-01-23 13:11:48,881 - INFO -     Dropped: ['qed', 'Ipc']
+2026-01-23 13:12:01,641 - INFO -     n=65, AUC=0.9617, Acc=0.9346, F1=0.7751
+2026-01-23 13:12:01,642 - INFO -     Dropped: ['VSA_EState2', 'fr_nitro']
+2026-01-23 13:12:13,684 - INFO -     n=63, AUC=0.9649, Acc=0.9363, F1=0.7910
+2026-01-23 13:12:13,685 - INFO -     Dropped: ['PEOE_VSA11', 'EState_VSA5']
+2026-01-23 13:12:24,905 - INFO -     n=61, AUC=0.9607, Acc=0.9355, F1=0.7839
+2026-01-23 13:12:24,905 - INFO -     Dropped: ['FpDensityMorgan1', 'NumSaturatedHeterocycles']
+2026-01-23 13:12:35,406 - INFO -     n=59, AUC=0.9614, Acc=0.9346, F1=0.7765
+2026-01-23 13:12:35,407 - INFO -     Dropped: ['PEOE_VSA2', 'fr_ArN']
+2026-01-23 13:12:45,187 - INFO -     n=57, AUC=0.9585, Acc=0.9320, F1=0.7697
+2026-01-23 13:12:45,187 - INFO -     Dropped: ['BCUT2D_MRHI', 'fr_Ar_N']
+2026-01-23 13:12:54,185 - INFO -     n=55, AUC=0.9612, Acc=0.9260, F1=0.7529
+2026-01-23 13:12:54,185 - INFO -     Dropped: ['BCUT2D_MWHI', 'NumHeteroatoms']
+2026-01-23 13:13:02,612 - INFO -     n=53, AUC=0.9596, Acc=0.9286, F1=0.7566
+2026-01-23 13:13:02,612 - INFO -     Dropped: ['PEOE_VSA14', 'SMR_VSA5']
+2026-01-23 13:13:10,326 - INFO -     n=51, AUC=0.9593, Acc=0.9303, F1=0.7679
+2026-01-23 13:13:10,326 - INFO -     Dropped: ['MolWt', 'VSA_EState4']
+2026-01-23 13:13:17,349 - INFO -     n=49, AUC=0.9570, Acc=0.9277, F1=0.7515
+2026-01-23 13:13:17,349 - INFO -     Dropped: ['BCUT2D_CHGHI', 'BCUT2D_CHGLO']
+2026-01-23 13:13:23,831 - INFO -     n=47, AUC=0.9573, Acc=0.9243, F1=0.7381
+2026-01-23 13:13:23,832 - INFO -     Dropped: ['FpDensityMorgan2', 'PEOE_VSA6']
+2026-01-23 13:13:29,708 - INFO -     n=45, AUC=0.9549, Acc=0.9234, F1=0.7343
+2026-01-23 13:13:29,708 - INFO -     Dropped: ['EState_VSA4', 'VSA_EState7']
+2026-01-23 13:13:35,057 - INFO -     n=43, AUC=0.9538, Acc=0.9243, F1=0.7396
+2026-01-23 13:13:35,057 - INFO -     Dropped: ['PEOE_VSA12', 'SlogP_VSA6']
+2026-01-23 13:13:39,893 - INFO -     n=41, AUC=0.9547, Acc=0.9200, F1=0.7335
+2026-01-23 13:13:39,893 - INFO -     Dropped: ['BertzCT', 'EState_VSA6']
+2026-01-23 13:13:44,284 - INFO -     n=39, AUC=0.9547, Acc=0.9208, F1=0.7356
+2026-01-23 13:13:44,284 - INFO -     Dropped: ['BCUT2D_MRLOW', 'HallKierAlpha']
+2026-01-23 13:13:48,256 - INFO -     n=37, AUC=0.9557, Acc=0.9260, F1=0.7543
+2026-01-23 13:13:48,256 - INFO -     Dropped: ['SlogP_VSA11', 'MolMR']
+2026-01-23 13:13:51,813 - INFO -     n=35, AUC=0.9539, Acc=0.9303, F1=0.7692
+2026-01-23 13:13:51,813 - INFO -     Dropped: ['EState_VSA1', 'fr_nitro_arom_nonortho']
+2026-01-23 13:13:55,000 - INFO -     n=33, AUC=0.9560, Acc=0.9243, F1=0.7471
+2026-01-23 13:13:55,000 - INFO -     Dropped: ['MinPartialCharge', 'SMR_VSA3']
+2026-01-23 13:13:57,841 - INFO -     n=31, AUC=0.9516, Acc=0.9217, F1=0.7378
+2026-01-23 13:13:57,841 - INFO -     Dropped: ['EState_VSA10', 'VSA_EState9']
+2026-01-23 13:14:00,301 - INFO -     n=29, AUC=0.9464, Acc=0.9243, F1=0.7514
+2026-01-23 13:14:00,301 - INFO -     Dropped: ['BCUT2D_LOGPHI', 'SlogP_VSA1']
+2026-01-23 13:14:02,442 - INFO -     n=27, AUC=0.9491, Acc=0.9243, F1=0.7542
+2026-01-23 13:14:02,443 - INFO -     Dropped: ['VSA_EState10', 'VSA_EState3']
+2026-01-23 13:14:04,304 - INFO -     n=25, AUC=0.9490, Acc=0.9234, F1=0.7507
+2026-01-23 13:14:04,305 - INFO -     Dropped: ['SlogP_VSA4', 'fr_aniline']
+2026-01-23 13:14:05,904 - INFO -     n=23, AUC=0.9438, Acc=0.9277, F1=0.7586
+2026-01-23 13:14:05,904 - INFO -     Dropped: ['LabuteASA', 'SlogP_VSA2']
+2026-01-23 13:14:07,249 - INFO -     n=21, AUC=0.9378, Acc=0.9174, F1=0.7348
+2026-01-23 13:14:07,250 - INFO -     Dropped: ['Chi1', 'FractionCSP3']
+2026-01-23 13:14:08,381 - INFO -     n=19, AUC=0.9448, Acc=0.9174, F1=0.7318
+2026-01-23 13:14:08,381 - INFO -     Dropped: ['SMR_VSA7', 'SMR_VSA9']
+2026-01-23 13:14:09,328 - INFO -     n=17, AUC=0.9389, Acc=0.9096, F1=0.7009
+2026-01-23 13:14:09,328 - INFO -     Dropped: ['SMR_VSA6', 'SlogP_VSA10']
+2026-01-23 13:14:10,125 - INFO -     n=15, AUC=0.9353, Acc=0.9088, F1=0.6936
+2026-01-23 13:14:10,126 - INFO -     Dropped: ['SR-ATAD5', 'PEOE_VSA13']
+2026-01-23 13:14:10,785 - INFO -     n=13, AUC=0.9032, Acc=0.8993, F1=0.6609
+2026-01-23 13:14:10,785 - INFO -     Dropped: ['NR-AR-LBD', 'MolLogP']
+2026-01-23 13:14:11,515 - INFO -     n=11, AUC=0.9074, Acc=0.8959, F1=0.6472
+2026-01-23 13:14:11,515 - INFO -     Dropped: ['NR-ER-LBD', 'fr_COO']
+2026-01-23 13:14:11,946 - INFO -     n=9, AUC=0.9040, Acc=0.8941, F1=0.6144
+2026-01-23 13:14:11,946 - INFO -     Dropped: ['NR-ER', 'SR-ARE']
+2026-01-23 13:14:12,288 - INFO -     n=7, AUC=0.8914, Acc=0.8864, F1=0.5769
+2026-01-23 13:14:12,288 - INFO -     Dropped: ['NumAromaticCarbocycles', 'fr_piperdine']
+2026-01-23 13:14:12,545 - INFO -     n=5, AUC=0.8852, Acc=0.8873, F1=0.5815
+2026-01-23 13:14:12,546 - INFO -     Dropped: ['NR-PPAR-gamma', 'fr_Al_COO']
+2026-01-23 13:14:12,706 - INFO -     n=3, AUC=0.8673, Acc=0.8864, F1=0.5686
+2026-01-23 13:14:12,706 - INFO -     Dropped: ['fr_nitro_arom', 'fr_phenol_noOrthoHbond']
+2026-01-23 13:14:12,786 - INFO -     n=1, AUC=0.7169, Acc=0.8812, F1=0.5577
+2026-01-23 13:14:12,786 - INFO -     Dropped: ['NR-AhR', 'NR-Aromatase']
+2026-01-23 13:14:12,787 - INFO -   → Best for repeat 2: 129 features, AUC=0.9690
+2026-01-23 13:14:12,787 - INFO - 
+  Repeat 3/3
+2026-01-23 13:16:29,325 - INFO -     n=213, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:16:29,325 - INFO -     Dropped: ['fr_furan', 'fr_urea']
+2026-01-23 13:18:43,193 - INFO -     n=211, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:18:43,194 - INFO -     Dropped: ['SMR_VSA2', 'fr_guanido']
+2026-01-23 13:20:54,576 - INFO -     n=209, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:20:54,576 - INFO -     Dropped: ['fr_hdrzone', 'fr_imidazole']
+2026-01-23 13:23:03,594 - INFO -     n=207, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:23:03,595 - INFO -     Dropped: ['fr_dihydropyridine', 'fr_imide']
+2026-01-23 13:25:11,154 - INFO -     n=205, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:25:11,154 - INFO -     Dropped: ['fr_benzodiazepine', 'fr_isocyan']
+2026-01-23 13:27:16,572 - INFO -     n=203, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:27:16,572 - INFO -     Dropped: ['fr_benzene', 'fr_isothiocyan']
+2026-01-23 13:29:19,985 - INFO -     n=201, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:29:19,985 - INFO -     Dropped: ['fr_barbitur', 'fr_ketone']
+2026-01-23 13:31:21,533 - INFO -     n=199, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:31:21,534 - INFO -     Dropped: ['NumAromaticHeterocycles', 'fr_azo']
+2026-01-23 13:33:21,055 - INFO -     n=197, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:33:21,056 - INFO -     Dropped: ['NumAromaticRings', 'fr_lactam']
+2026-01-23 13:35:18,475 - INFO -     n=195, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:35:18,475 - INFO -     Dropped: ['NumRadicalElectrons', 'NumAliphaticHeterocycles']
+2026-01-23 13:37:13,986 - INFO -     n=193, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:37:13,986 - INFO -     Dropped: ['fr_Al_OH', 'fr_lactone']
+2026-01-23 13:39:07,807 - INFO -     n=191, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:39:07,807 - INFO -     Dropped: ['HeavyAtomCount', 'fr_morpholine']
+2026-01-23 13:40:59,518 - INFO -     n=189, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:40:59,518 - INFO -     Dropped: ['fr_ArN', 'fr_nitrile']
+2026-01-23 13:42:49,089 - INFO -     n=187, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:42:49,090 - INFO -     Dropped: ['fr_Ar_COO', 'fr_nitroso']
+2026-01-23 13:44:36,936 - INFO -     n=185, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:44:36,936 - INFO -     Dropped: ['fr_Ar_NH', 'fr_oxazole']
+2026-01-23 13:46:22,959 - INFO -     n=183, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:46:22,960 - INFO -     Dropped: ['EState_VSA11', 'fr_oxime']
+2026-01-23 13:48:07,019 - INFO -     n=181, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:48:07,020 - INFO -     Dropped: ['MaxAbsEStateIndex', 'fr_C_O_noCOO']
+2026-01-23 13:49:49,021 - INFO -     n=179, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:49:49,021 - INFO -     Dropped: ['fr_HOCCN', 'fr_phenol']
+2026-01-23 13:51:29,219 - INFO -     n=177, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:51:29,220 - INFO -     Dropped: ['fr_Imine', 'fr_phos_acid']
+2026-01-23 13:53:07,621 - INFO -     n=175, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:53:07,621 - INFO -     Dropped: ['fr_NH2', 'fr_phos_ester']
+2026-01-23 13:54:44,080 - INFO -     n=173, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:54:44,080 - INFO -     Dropped: ['fr_N_O', 'fr_piperzine']
+2026-01-23 13:56:18,609 - INFO -     n=171, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:56:18,609 - INFO -     Dropped: ['fr_priamide', 'fr_thiocyan']
+2026-01-23 13:57:51,182 - INFO -     n=169, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:57:51,182 - INFO -     Dropped: ['fr_azide', 'fr_hdrzine']
+2026-01-23 13:59:21,813 - INFO -     n=167, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 13:59:21,813 - INFO -     Dropped: ['fr_amidine', 'fr_tetrazole']
+2026-01-23 14:00:51,001 - INFO -     n=165, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 14:00:51,001 - INFO -     Dropped: ['fr_alkyl_carbamate', 'fr_term_acetylene']
+2026-01-23 14:02:18,210 - INFO -     n=163, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 14:02:18,211 - INFO -     Dropped: ['fr_sulfonamd', 'fr_sulfone']
+2026-01-23 14:03:43,399 - INFO -     n=161, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 14:03:43,400 - INFO -     Dropped: ['fr_pyridine', 'fr_quatN']
+2026-01-23 14:05:06,784 - INFO -     n=159, AUC=0.9591, Acc=0.9260, F1=0.7500
+2026-01-23 14:05:06,784 - INFO -     Dropped: ['fr_SH', 'fr_aldehyde']
+2026-01-23 14:06:28,068 - INFO -     n=157, AUC=0.9595, Acc=0.9260, F1=0.7500
+2026-01-23 14:06:28,068 - INFO -     Dropped: ['fr_C_O', 'fr_Nhpyrrole']
+2026-01-23 14:07:47,622 - INFO -     n=155, AUC=0.9603, Acc=0.9269, F1=0.7507
+2026-01-23 14:07:47,622 - INFO -     Dropped: ['ExactMolWt', 'fr_ketone_Topliss']
+2026-01-23 14:09:05,374 - INFO -     n=153, AUC=0.9593, Acc=0.9191, F1=0.7267
+2026-01-23 14:09:05,374 - INFO -     Dropped: ['NumSaturatedRings', 'fr_ester']
+2026-01-23 14:10:21,159 - INFO -     n=151, AUC=0.9600, Acc=0.9200, F1=0.7320
+2026-01-23 14:10:21,159 - INFO -     Dropped: ['Chi0', 'SlogP_VSA7']
+2026-01-23 14:11:34,923 - INFO -     n=149, AUC=0.9600, Acc=0.9200, F1=0.7320
+2026-01-23 14:11:34,923 - INFO -     Dropped: ['fr_Ndealkylation1', 'fr_sulfide']
+2026-01-23 14:12:47,039 - INFO -     n=147, AUC=0.9582, Acc=0.9243, F1=0.7471
+2026-01-23 14:12:47,040 - INFO -     Dropped: ['NumHeteroatoms', 'fr_aryl_methyl']
+2026-01-23 14:13:57,303 - INFO -     n=145, AUC=0.9582, Acc=0.9243, F1=0.7471
+2026-01-23 14:13:57,303 - INFO -     Dropped: ['fr_methoxy', 'fr_unbrch_alkane']
+2026-01-23 14:15:05,947 - INFO -     n=143, AUC=0.9582, Acc=0.9243, F1=0.7471
+2026-01-23 14:15:05,948 - INFO -     Dropped: ['NumAliphaticRings', 'fr_amide']
+2026-01-23 14:16:12,944 - INFO -     n=141, AUC=0.9582, Acc=0.9243, F1=0.7471
+2026-01-23 14:16:12,944 - INFO -     Dropped: ['fr_Al_OH_noTert', 'fr_alkyl_halide']
+2026-01-23 14:17:17,949 - INFO -     n=139, AUC=0.9573, Acc=0.9174, F1=0.7288
+2026-01-23 14:17:17,949 - INFO -     Dropped: ['PEOE_VSA5', 'NumAliphaticCarbocycles']
+2026-01-23 14:18:30,816 - INFO -     n=137, AUC=0.9596, Acc=0.9182, F1=0.7309
+2026-01-23 14:18:30,816 - INFO -     Dropped: ['Chi2n', 'EState_VSA10']
+2026-01-23 14:19:55,277 - INFO -     n=135, AUC=0.9612, Acc=0.9251, F1=0.7478
+2026-01-23 14:19:55,278 - INFO -     Dropped: ['MinAbsPartialCharge', 'fr_COO2']
+2026-01-23 14:21:15,259 - INFO -     n=133, AUC=0.9596, Acc=0.9182, F1=0.7262
+2026-01-23 14:21:15,260 - INFO -     Dropped: ['NR-AR', 'PEOE_VSA11']
+2026-01-23 14:22:20,705 - INFO -     n=131, AUC=0.9611, Acc=0.9243, F1=0.7457
+2026-01-23 14:22:20,705 - INFO -     Dropped: ['SR-HSE', 'PEOE_VSA10']
+2026-01-23 14:23:15,770 - INFO -     n=129, AUC=0.9591, Acc=0.9191, F1=0.7251
+2026-01-23 14:23:15,770 - INFO -     Dropped: ['RingCount', 'fr_NH1']
+2026-01-23 14:24:08,832 - INFO -     n=127, AUC=0.9612, Acc=0.9217, F1=0.7393
+2026-01-23 14:24:08,833 - INFO -     Dropped: ['Chi4n', 'SlogP_VSA12']
+2026-01-23 14:25:00,257 - INFO -     n=125, AUC=0.9595, Acc=0.9191, F1=0.7330
+2026-01-23 14:25:00,257 - INFO -     Dropped: ['NumValenceElectrons', 'EState_VSA6']
+2026-01-23 14:25:50,205 - INFO -     n=123, AUC=0.9570, Acc=0.9217, F1=0.7347
+2026-01-23 14:25:50,205 - INFO -     Dropped: ['fr_allylic_oxid', 'fr_bicyclic']
+2026-01-23 14:26:38,576 - INFO -     n=121, AUC=0.9595, Acc=0.9234, F1=0.7390
+2026-01-23 14:26:38,576 - INFO -     Dropped: ['BCUT2D_MWHI', 'fr_thiophene']
+2026-01-23 14:27:25,387 - INFO -     n=119, AUC=0.9595, Acc=0.9234, F1=0.7390
+2026-01-23 14:27:25,387 - INFO -     Dropped: ['fr_nitro_arom_nonortho', 'fr_thiazole']
+2026-01-23 14:28:10,536 - INFO -     n=117, AUC=0.9594, Acc=0.9277, F1=0.7558
+2026-01-23 14:28:10,536 - INFO -     Dropped: ['SMR_VSA4', 'fr_C_S']
+2026-01-23 14:28:54,196 - INFO -     n=115, AUC=0.9608, Acc=0.9234, F1=0.7420
+2026-01-23 14:28:54,197 - INFO -     Dropped: ['fr_Ar_N', 'fr_para_hydroxylation']
+2026-01-23 14:29:36,330 - INFO -     n=113, AUC=0.9605, Acc=0.9303, F1=0.7638
+2026-01-23 14:29:36,330 - INFO -     Dropped: ['PEOE_VSA4', 'SlogP_VSA4']
+2026-01-23 14:30:16,971 - INFO -     n=111, AUC=0.9578, Acc=0.9217, F1=0.7331
+2026-01-23 14:30:16,971 - INFO -     Dropped: ['VSA_EState2', 'fr_Ndealkylation2']
+2026-01-23 14:30:56,121 - INFO -     n=109, AUC=0.9588, Acc=0.9234, F1=0.7390
+2026-01-23 14:30:56,122 - INFO -     Dropped: ['VSA_EState10', 'NOCount']
+2026-01-23 14:31:33,767 - INFO -     n=107, AUC=0.9587, Acc=0.9182, F1=0.7246
+2026-01-23 14:31:33,767 - INFO -     Dropped: ['LabuteASA', 'NumHAcceptors']
+2026-01-23 14:32:09,974 - INFO -     n=105, AUC=0.9597, Acc=0.9234, F1=0.7435
+2026-01-23 14:32:09,974 - INFO -     Dropped: ['NumRotatableBonds', 'fr_aniline']
+2026-01-23 14:32:44,764 - INFO -     n=103, AUC=0.9608, Acc=0.9251, F1=0.7507
+2026-01-23 14:32:44,765 - INFO -     Dropped: ['Chi0n', 'PEOE_VSA14']
+2026-01-23 14:33:18,137 - INFO -     n=101, AUC=0.9600, Acc=0.9208, F1=0.7294
+2026-01-23 14:33:18,138 - INFO -     Dropped: ['EState_VSA3', 'NumHDonors']
+2026-01-23 14:33:50,303 - INFO -     n=99, AUC=0.9596, Acc=0.9182, F1=0.7262
+2026-01-23 14:33:50,303 - INFO -     Dropped: ['BalabanJ', 'VSA_EState1']
+2026-01-23 14:34:28,263 - INFO -     n=97, AUC=0.9582, Acc=0.9200, F1=0.7304
+2026-01-23 14:34:28,264 - INFO -     Dropped: ['qed', 'Chi3v']
+2026-01-23 14:35:01,088 - INFO -     n=95, AUC=0.9575, Acc=0.9260, F1=0.7514
+2026-01-23 14:35:01,089 - INFO -     Dropped: ['MinAbsEStateIndex', 'VSA_EState4']
+2026-01-23 14:35:31,763 - INFO -     n=93, AUC=0.9562, Acc=0.9234, F1=0.7405
+2026-01-23 14:35:31,763 - INFO -     Dropped: ['EState_VSA1', 'EState_VSA5']
+2026-01-23 14:36:00,961 - INFO -     n=91, AUC=0.9551, Acc=0.9251, F1=0.7507
+2026-01-23 14:36:00,961 - INFO -     Dropped: ['FpDensityMorgan3', 'fr_epoxide']
+2026-01-23 14:36:28,856 - INFO -     n=89, AUC=0.9572, Acc=0.9225, F1=0.7414
+2026-01-23 14:36:28,856 - INFO -     Dropped: ['Chi1n', 'EState_VSA2']
+2026-01-23 14:36:55,520 - INFO -     n=87, AUC=0.9589, Acc=0.9200, F1=0.7224
+2026-01-23 14:36:55,521 - INFO -     Dropped: ['Kappa1', 'Kappa3']
+2026-01-23 14:37:20,918 - INFO -     n=85, AUC=0.9585, Acc=0.9260, F1=0.7543
+2026-01-23 14:37:20,918 - INFO -     Dropped: ['SlogP_VSA1', 'NumAromaticCarbocycles']
+2026-01-23 14:37:45,193 - INFO -     n=83, AUC=0.9542, Acc=0.9243, F1=0.7457
+2026-01-23 14:37:45,193 - INFO -     Dropped: ['EState_VSA9', 'fr_NH0']
+2026-01-23 14:38:08,348 - INFO -     n=81, AUC=0.9574, Acc=0.9269, F1=0.7536
+2026-01-23 14:38:08,348 - INFO -     Dropped: ['PEOE_VSA3', 'PEOE_VSA7']
+2026-01-23 14:38:30,415 - INFO -     n=79, AUC=0.9581, Acc=0.9234, F1=0.7435
+2026-01-23 14:38:30,415 - INFO -     Dropped: ['PEOE_VSA8', 'fr_ether']
+2026-01-23 14:38:51,041 - INFO -     n=77, AUC=0.9570, Acc=0.9243, F1=0.7427
+2026-01-23 14:38:51,041 - INFO -     Dropped: ['SlogP_VSA11', 'VSA_EState8']
+2026-01-23 14:39:10,414 - INFO -     n=75, AUC=0.9603, Acc=0.9234, F1=0.7405
+2026-01-23 14:39:10,414 - INFO -     Dropped: ['FpDensityMorgan1', 'BCUT2D_MRHI']
+2026-01-23 14:39:28,705 - INFO -     n=73, AUC=0.9591, Acc=0.9225, F1=0.7399
+2026-01-23 14:39:28,706 - INFO -     Dropped: ['BCUT2D_CHGLO', 'PEOE_VSA9']
+2026-01-23 14:39:45,954 - INFO -     n=71, AUC=0.9547, Acc=0.9269, F1=0.7522
+2026-01-23 14:39:45,954 - INFO -     Dropped: ['MaxPartialCharge', 'SMR_VSA5']
+2026-01-23 14:40:02,193 - INFO -     n=69, AUC=0.9556, Acc=0.9165, F1=0.7221
+2026-01-23 14:40:02,193 - INFO -     Dropped: ['Kappa2', 'NHOHCount']
+2026-01-23 14:40:17,413 - INFO -     n=67, AUC=0.9569, Acc=0.9234, F1=0.7420
+2026-01-23 14:40:17,413 - INFO -     Dropped: ['Ipc', 'EState_VSA7']
+2026-01-23 14:40:31,687 - INFO -     n=65, AUC=0.9592, Acc=0.9260, F1=0.7485
+2026-01-23 14:40:31,687 - INFO -     Dropped: ['Chi4v', 'EState_VSA8']
+2026-01-23 14:40:44,960 - INFO -     n=63, AUC=0.9576, Acc=0.9234, F1=0.7375
+2026-01-23 14:40:44,960 - INFO -     Dropped: ['HeavyAtomMolWt', 'PEOE_VSA2']
+2026-01-23 14:40:57,309 - INFO -     n=61, AUC=0.9586, Acc=0.9277, F1=0.7515
+2026-01-23 14:40:57,310 - INFO -     Dropped: ['Chi0v', 'SlogP_VSA5']
+2026-01-23 14:41:08,772 - INFO -     n=59, AUC=0.9565, Acc=0.9182, F1=0.7214
+2026-01-23 14:41:08,772 - INFO -     Dropped: ['FpDensityMorgan2', 'Chi1']
+2026-01-23 14:41:19,426 - INFO -     n=57, AUC=0.9582, Acc=0.9269, F1=0.7522
+2026-01-23 14:41:19,427 - INFO -     Dropped: ['SMR_VSA10', 'SlogP_VSA8']
+2026-01-23 14:41:29,248 - INFO -     n=55, AUC=0.9643, Acc=0.9243, F1=0.7381
+2026-01-23 14:41:29,248 - INFO -     Dropped: ['BCUT2D_CHGHI', 'Chi3n']
+2026-01-23 14:41:38,339 - INFO -     n=53, AUC=0.9591, Acc=0.9243, F1=0.7442
+2026-01-23 14:41:38,339 - INFO -     Dropped: ['VSA_EState6', 'VSA_EState7']
+2026-01-23 14:41:46,682 - INFO -     n=51, AUC=0.9588, Acc=0.9225, F1=0.7399
+2026-01-23 14:41:46,683 - INFO -     Dropped: ['TPSA', 'VSA_EState5']
+2026-01-23 14:41:54,329 - INFO -     n=49, AUC=0.9592, Acc=0.9251, F1=0.7464
+2026-01-23 14:41:54,329 - INFO -     Dropped: ['BCUT2D_MRLOW', 'Chi2v']
+2026-01-23 14:42:01,323 - INFO -     n=47, AUC=0.9574, Acc=0.9191, F1=0.7360
+2026-01-23 14:42:01,323 - INFO -     Dropped: ['NR-AR-LBD', 'SlogP_VSA3']
+2026-01-23 14:42:07,675 - INFO -     n=45, AUC=0.9601, Acc=0.9243, F1=0.7471
+2026-01-23 14:42:07,675 - INFO -     Dropped: ['MaxAbsPartialCharge', 'BCUT2D_MWLOW']
+2026-01-23 14:42:13,422 - INFO -     n=43, AUC=0.9582, Acc=0.9243, F1=0.7427
+2026-01-23 14:42:13,422 - INFO -     Dropped: ['PEOE_VSA6', 'fr_halogen']
+2026-01-23 14:42:18,627 - INFO -     n=41, AUC=0.9572, Acc=0.9251, F1=0.7507
+2026-01-23 14:42:18,627 - INFO -     Dropped: ['MinEStateIndex', 'BCUT2D_LOGPLOW']
+2026-01-23 14:42:23,287 - INFO -     n=39, AUC=0.9620, Acc=0.9165, F1=0.7155
+2026-01-23 14:42:23,287 - INFO -     Dropped: ['SlogP_VSA6', 'EState_VSA4']
+2026-01-23 14:42:27,433 - INFO -     n=37, AUC=0.9615, Acc=0.9294, F1=0.7644
+2026-01-23 14:42:27,433 - INFO -     Dropped: ['MolWt', 'HallKierAlpha']
+2026-01-23 14:42:31,090 - INFO -     n=35, AUC=0.9606, Acc=0.9251, F1=0.7521
+2026-01-23 14:42:31,090 - INFO -     Dropped: ['MaxEStateIndex', 'BertzCT']
+2026-01-23 14:42:34,322 - INFO -     n=33, AUC=0.9583, Acc=0.9225, F1=0.7399
+2026-01-23 14:42:34,322 - INFO -     Dropped: ['Chi1v', 'SMR_VSA1']
+2026-01-23 14:42:37,207 - INFO -     n=31, AUC=0.9612, Acc=0.9277, F1=0.7586
+2026-01-23 14:42:37,207 - INFO -     Dropped: ['MinPartialCharge', 'NumSaturatedCarbocycles']
+2026-01-23 14:42:39,734 - INFO -     n=29, AUC=0.9584, Acc=0.9294, F1=0.7616
+2026-01-23 14:42:39,734 - INFO -     Dropped: ['PEOE_VSA12', 'MolMR']
+2026-01-23 14:42:41,941 - INFO -     n=27, AUC=0.9556, Acc=0.9269, F1=0.7536
+2026-01-23 14:42:41,941 - INFO -     Dropped: ['PEOE_VSA1', 'VSA_EState9']
+2026-01-23 14:42:43,850 - INFO -     n=25, AUC=0.9462, Acc=0.9157, F1=0.7101
+2026-01-23 14:42:43,850 - INFO -     Dropped: ['SMR_VSA7', 'SlogP_VSA2']
+2026-01-23 14:42:45,479 - INFO -     n=23, AUC=0.9453, Acc=0.9217, F1=0.7437
+2026-01-23 14:42:45,479 - INFO -     Dropped: ['BCUT2D_LOGPHI', 'VSA_EState3']
+2026-01-23 14:42:46,863 - INFO -     n=21, AUC=0.9442, Acc=0.9191, F1=0.7330
+2026-01-23 14:42:46,863 - INFO -     Dropped: ['FractionCSP3', 'NumSaturatedHeterocycles']
+2026-01-23 14:42:48,067 - INFO -     n=19, AUC=0.9341, Acc=0.9105, F1=0.7062
+2026-01-23 14:42:48,067 - INFO -     Dropped: ['SMR_VSA6', 'fr_nitro_arom']
+2026-01-23 14:42:49,089 - INFO -     n=17, AUC=0.9308, Acc=0.9071, F1=0.7017
+2026-01-23 14:42:49,089 - INFO -     Dropped: ['SMR_VSA3', 'SMR_VSA9']
+2026-01-23 14:42:49,948 - INFO -     n=15, AUC=0.9127, Acc=0.8993, F1=0.6648
+2026-01-23 14:42:49,948 - INFO -     Dropped: ['PEOE_VSA13', 'SlogP_VSA10']
+2026-01-23 14:42:50,662 - INFO -     n=13, AUC=0.8932, Acc=0.8847, F1=0.6012
+2026-01-23 14:42:50,662 - INFO -     Dropped: ['MolLogP', 'fr_COO']
+2026-01-23 14:42:51,250 - INFO -     n=11, AUC=0.8962, Acc=0.8967, F1=0.6364
+2026-01-23 14:42:51,251 - INFO -     Dropped: ['NR-ER-LBD', 'SR-ATAD5']
+2026-01-23 14:42:51,735 - INFO -     n=9, AUC=0.8864, Acc=0.8933, F1=0.6265
+2026-01-23 14:42:51,735 - INFO -     Dropped: ['fr_Al_COO', 'fr_piperdine']
+2026-01-23 14:42:52,117 - INFO -     n=7, AUC=0.8760, Acc=0.8881, F1=0.5912
+2026-01-23 14:42:52,117 - INFO -     Dropped: ['SR-ARE', 'fr_phenol_noOrthoHbond']
+2026-01-23 14:42:52,401 - INFO -     n=5, AUC=0.8741, Acc=0.8873, F1=0.5761
+2026-01-23 14:42:52,401 - INFO -     Dropped: ['NR-ER', 'fr_nitro']
+2026-01-23 14:42:52,577 - INFO -     n=3, AUC=0.8361, Acc=0.8821, F1=0.5651
+2026-01-23 14:42:52,577 - INFO -     Dropped: ['NR-PPAR-gamma', 'fr_Ar_OH']
+2026-01-23 14:42:52,663 - INFO -     n=1, AUC=0.7181, Acc=0.8761, F1=0.5528
+2026-01-23 14:42:52,663 - INFO -     Dropped: ['NR-AhR', 'NR-Aromatase']
+2026-01-23 14:42:52,664 - INFO -   → Best for repeat 3: 55 features, AUC=0.9643
+2026-01-23 14:42:52,665 - INFO - 
+✓ Overall best: 129 features from repeat 2, AUC=0.9690
+2026-01-23 14:42:52,677 - INFO - ✓ Saved features → selected_features.txt
+2026-01-23 14:42:52,711 - INFO - Generating RFE summary plot...
+2026-01-23 14:42:52,716 - INFO -   ✓ Saved RFE plot data → SR-MMP_rfe_plot_data.npz
+2026-01-23 14:42:53,215 - INFO -   ✓ Saved RFE plot → SR-MMP_rfe.png
+2026-01-23 14:42:53,219 - INFO - 
+STAGE 3: Data Splitting
+2026-01-23 14:42:53,219 - INFO - ----------------------------------------------------------------------
+2026-01-23 14:42:53,225 - INFO - ✓ Training+Val set: 5229 samples
+2026-01-23 14:42:53,225 - INFO - ✓ Test set: 581 samples
+2026-01-23 14:42:53,225 - INFO - 
+STAGE 4: Hyperparameter Optimization (RandomizedSearchCV)
+2026-01-23 14:42:53,225 - INFO - ----------------------------------------------------------------------
+2026-01-23 14:42:53,225 - INFO - Running RandomizedSearchCV with 10000 iterations...
+2026-01-23 14:42:53,225 - INFO - Total fits (with 5-fold CV): 50000
+Fitting 5 folds for each of 10000 candidates, totalling 50000 fits
+2026-01-23 20:25:05,826 - INFO - 
+✓ Best hyperparameters: {'subsample': 0.7, 'scale_pos_weight': 5, 'n_estimators': 2000, 'min_child_weight': 1, 'max_depth': 10, 'learning_rate': 0.01, 'colsample_bytree': 0.7}
+2026-01-23 20:25:05,826 - INFO - ✓ Best 5-fold CV AUC: 0.9601
+2026-01-23 20:25:06,042 - INFO - ✓ Saved CV results
+2026-01-23 20:25:06,042 - INFO - 
+STAGE 5: Test Set Evaluation
+2026-01-23 20:25:06,042 - INFO - ----------------------------------------------------------------------
+2026-01-23 20:25:06,188 - INFO - Generating diagnostic plots...
+2026-01-23 20:25:06,203 - INFO -   ✓ Saved diagnostic plot data → SR-MMP_diagnostic_plot_data.npz
+2026-01-23 20:25:07,251 - INFO -   ✓ Saved diagnostic plots → SR-MMP_diagnostics.png
+2026-01-23 20:25:07,251 - INFO - 
+✓ Test Set Performance:
+2026-01-23 20:25:07,251 - INFO -   ROC-AUC:    0.9794
+2026-01-23 20:25:07,251 - INFO -   PR-AUC:     0.9150
+2026-01-23 20:25:07,251 - INFO -   Accuracy:   0.9484
+2026-01-23 20:25:07,251 - INFO -   F1:         0.8193
+2026-01-23 20:25:07,251 - INFO -   MCC:        0.7959
+2026-01-23 20:25:07,251 - INFO - 
+STAGE 6: SHAP Analysis
+2026-01-23 20:25:07,251 - INFO - ----------------------------------------------------------------------
+2026-01-23 20:25:07,251 - INFO - Running SHAP analysis...
+2026-01-23 20:25:53,410 - INFO -   ✓ Saved SHAP data → SR-MMP_shap_data.npz
+2026-01-23 20:25:54,791 - INFO -   ✓ Saved SHAP plots
+2026-01-23 20:25:54,796 - INFO - 
+STAGE 7: Saving Results
+2026-01-23 20:25:54,796 - INFO - ----------------------------------------------------------------------
+2026-01-23 20:25:54,860 - INFO - ✓ Saved model → xgb_model.joblib
+2026-01-23 20:25:54,861 - INFO - ✓ Saved summary → model_summary.txt
+2026-01-23 20:25:54,861 - INFO - 
+======================================================================
+2026-01-23 20:25:54,861 - INFO - ✓ TRAINING COMPLETE for SR-MMP! Total time: 9:55:39.256537
+2026-01-23 20:25:54,861 - INFO - ✓ Performance: ROC-AUC=0.9794, F1=0.8193
+2026-01-23 20:25:54,861 - INFO - ======================================================================
+2026-01-23 20:25:54,863 - INFO - 
+✓ ALL TRAINING COMPLETE! Total time: 9:55:39.400391
+========================================
+Training completed at: Fri 23 Jan 20:25:55 GMT 2026
+Exit status: 0
+========================================
+
+Output locations:
+  Model:    ./output/tox21/SR-MMP/model/xgb_model.joblib
+  Summary:  ./output/tox21/SR-MMP/model/model_summary.txt
+  Features: ./output/tox21/SR-MMP/RFE/selected_features.txt
+  Plots:    ./output/tox21/SR-MMP/plots/
+
+Cleaned up PBS output files

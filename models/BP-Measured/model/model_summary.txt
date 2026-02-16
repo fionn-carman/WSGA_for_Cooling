@@ -1,0 +1,58 @@
+============================================================
+XGBoost Hybrid Model Summary: BP-Measured
+============================================================
+
+Training completed: 2026-01-23 16:11:19
+Input file: BP-Measured_cleaned.csv
+Log-transformed target: False
+Training samples: 2494
+Method: RFE+RandomizedSearchCV (Hybrid)
+
+----------------------------------------
+Feature Selection:
+----------------------------------------
+  Method: RFE with 3 repeats
+  Step size: 2
+  Selected features: 19
+
+----------------------------------------
+Best Hyperparameters:
+----------------------------------------
+  subsample: 0.7
+  n_estimators: 2000
+  min_child_weight: 1
+  max_depth: 3
+  learning_rate: 0.05
+  colsample_bytree: 0.9
+
+----------------------------------------
+Performance Metrics:
+----------------------------------------
+5-Fold CV RMSE:        13.3625
+Test Set R²:           0.9724
+Test Set RMSE:         11.8490
+Test Set MAE:          6.6313
+80% PI Coverage:       73.2%
+
+----------------------------------------
+Selected Features (19 total):
+----------------------------------------
+  HeavyAtomMolWt
+  MinPartialCharge
+  BCUT2D_MRLOW
+  BertzCT
+  Chi1
+  HallKierAlpha
+  Ipc
+  PEOE_VSA1
+  SMR_VSA1
+  TPSA
+  VSA_EState3
+  VSA_EState8
+  FractionCSP3
+  NumSaturatedHeterocycles
+  fr_Al_OH_noTert
+  fr_C_O_noCOO
+  fr_furan
+  fr_lactone
+  fr_para_hydroxylation

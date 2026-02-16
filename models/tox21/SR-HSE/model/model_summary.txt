@@ -1,0 +1,90 @@
+============================================================
+XGBoost Classification Model Summary: SR-HSE
+============================================================
+
+Training completed: 2026-01-23 16:26:22
+Input file: tox21_cleaned.csv
+Valid samples: 6467
+Class distribution: 6095 neg, 372 pos (5.8% positive)
+Method: RFE+RandomizedSearchCV (Hybrid)
+
+----------------------------------------
+Feature Selection:
+----------------------------------------
+  Method: RFE with 3 repeats
+  Step size: 2
+  Selected features: 49
+
+----------------------------------------
+Best Hyperparameters:
+----------------------------------------
+  subsample: 0.7
+  scale_pos_weight: 2
+  n_estimators: 100
+  min_child_weight: 1
+  max_depth: 100
+  learning_rate: 0.05
+  colsample_bytree: 0.7
+
+----------------------------------------
+Performance Metrics:
+----------------------------------------
+5-Fold CV AUC:         0.8847
+Test Set ROC-AUC:      0.9273
+Test Set PR-AUC:       0.6642
+Test Set Accuracy:     0.9614
+Test Set F1:           0.5902
+Test Set MCC:          0.5856
+
+----------------------------------------
+Selected Features (49 total):
+----------------------------------------
+  NR-AR
+  NR-AR-LBD
+  NR-Aromatase
+  NR-ER-LBD
+  NR-PPAR-gamma
+  SR-ARE
+  SR-p53
+  MaxEStateIndex
+  MinEStateIndex
+  qed
+  MolWt
+  FpDensityMorgan2
+  FpDensityMorgan3
+  BCUT2D_MWHI
+  BCUT2D_MWLOW
+  BCUT2D_LOGPHI
+  BCUT2D_LOGPLOW
+  BCUT2D_MRHI
+  BCUT2D_MRLOW
+  BalabanJ
+  Chi1v
+  Kappa3
+  PEOE_VSA3
+  PEOE_VSA6
+  PEOE_VSA7
+  SMR_VSA1
+  SMR_VSA10
+  SMR_VSA7
+  SlogP_VSA1
+  SlogP_VSA10
+  SlogP_VSA11
+  SlogP_VSA2
+  SlogP_VSA4
+  SlogP_VSA7
+  EState_VSA7
+  VSA_EState4
+  VSA_EState5
+  VSA_EState7
+  VSA_EState8
+  FractionCSP3
+  NumAliphaticHeterocycles
+  NumRotatableBonds
+  MolLogP
+  fr_Ar_OH
+  fr_C_S
+  fr_allylic_oxid
+  fr_ester
+  fr_phenol_noOrthoHbond
+  fr_priamide

@@ -1,0 +1,114 @@
+============================================================
+XGBoost Classification Model Summary: NR-AhR
+============================================================
+
+Training completed: 2026-01-23 19:02:30
+Input file: tox21_cleaned.csv
+Valid samples: 6549
+Class distribution: 5781 neg, 768 pos (11.7% positive)
+Method: RFE+RandomizedSearchCV (Hybrid)
+
+----------------------------------------
+Feature Selection:
+----------------------------------------
+  Method: RFE with 3 repeats
+  Step size: 2
+  Selected features: 73
+
+----------------------------------------
+Best Hyperparameters:
+----------------------------------------
+  subsample: 0.7
+  scale_pos_weight: 2
+  n_estimators: 1000
+  min_child_weight: 1
+  max_depth: 100
+  learning_rate: 0.01
+  colsample_bytree: 0.7
+
+----------------------------------------
+Performance Metrics:
+----------------------------------------
+5-Fold CV AUC:         0.9298
+Test Set ROC-AUC:      0.9130
+Test Set PR-AUC:       0.6863
+Test Set Accuracy:     0.9206
+Test Set F1:           0.6119
+Test Set MCC:          0.5768
+
+----------------------------------------
+Selected Features (73 total):
+----------------------------------------
+  NR-Aromatase
+  NR-ER
+  NR-PPAR-gamma
+  SR-ARE
+  SR-ATAD5
+  SR-MMP
+  MinEStateIndex
+  qed
+  HeavyAtomMolWt
+  NumValenceElectrons
+  MaxPartialCharge
+  MinPartialCharge
+  MaxAbsPartialCharge
+  FpDensityMorgan1
+  FpDensityMorgan3
+  BCUT2D_MWHI
+  BCUT2D_MWLOW
+  BCUT2D_CHGHI
+  BCUT2D_CHGLO
+  BCUT2D_LOGPHI
+  BCUT2D_LOGPLOW
+  BCUT2D_MRHI
+  BCUT2D_MRLOW
+  BalabanJ
+  BertzCT
+  Chi3v
+  Chi4n
+  Kappa1
+  Kappa2
+  Kappa3
+  PEOE_VSA1
+  PEOE_VSA10
+  PEOE_VSA14
+  PEOE_VSA3
+  PEOE_VSA6
+  PEOE_VSA7
+  PEOE_VSA9
+  SMR_VSA1
+  SMR_VSA10
+  SMR_VSA5
+  SlogP_VSA1
+  SlogP_VSA10
+  SlogP_VSA11
+  SlogP_VSA12
+  SlogP_VSA3
+  SlogP_VSA8
+  TPSA
+  EState_VSA1
+  EState_VSA5
+  EState_VSA6
+  EState_VSA7
+  EState_VSA8
+  EState_VSA9
+  VSA_EState10
+  VSA_EState4
+  VSA_EState5
+  VSA_EState6
+  VSA_EState8
+  FractionCSP3
+  NHOHCount
+  NumAromaticRings
+  NumHAcceptors
+  NumHeteroatoms
+  MolLogP
+  fr_Ar_N
+  fr_Ar_NH
+  fr_aldehyde
+  fr_aniline
+  fr_bicyclic
+  fr_hdrzine
+  fr_hdrzone
+  fr_ketone
+  fr_thiazole

@@ -1,0 +1,46 @@
+============================================================
+XGBoost Classification Model Summary: NR-ER
+============================================================
+
+Training completed: 2026-01-23 16:44:13
+Input file: tox21_cleaned.csv
+Valid samples: 6193
+Class distribution: 5400 neg, 793 pos (12.8% positive)
+Method: RFE+RandomizedSearchCV (Hybrid)
+
+----------------------------------------
+Feature Selection:
+----------------------------------------
+  Method: RFE with 3 repeats
+  Step size: 2
+  Selected features: 5
+
+----------------------------------------
+Best Hyperparameters:
+----------------------------------------
+  subsample: 1.0
+  scale_pos_weight: 10
+  n_estimators: 200
+  min_child_weight: 6
+  max_depth: 6
+  learning_rate: 0.01
+  colsample_bytree: 1.0
+
+----------------------------------------
+Performance Metrics:
+----------------------------------------
+5-Fold CV AUC:         0.8087
+Test Set ROC-AUC:      0.7806
+Test Set PR-AUC:       0.5409
+Test Set Accuracy:     0.8419
+Test Set F1:           0.5000
+Test Set MCC:          0.4215
+
+----------------------------------------
+Selected Features (5 total):
+----------------------------------------
+  NR-AR
+  NR-AhR
+  NR-Aromatase
+  NR-ER-LBD
+  SR-ATAD5
