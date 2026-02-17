@@ -55,16 +55,20 @@ except ImportError:
 RDLogger.DisableLog("rdApp.*")
 
 try:
-    # Avoid importing parametric_umap which drags in TensorFlow
+    # Block TensorFlow import before importing umap to prevent
+    # umap/__init__.py -> parametric_umap -> tensorflow crash on some systems.
+    import types as _types
+    sys.modules.setdefault("tensorflow", _types.ModuleType("tensorflow"))
+
     import umap.umap_ as umap_module
     UMAP = umap_module.UMAP
     USE_UMAP = True
-except ImportError:
+except (ImportError, RuntimeError):
     try:
         import umap
         UMAP = umap.UMAP
         USE_UMAP = True
-    except ImportError:
+    except (ImportError, RuntimeError):
         USE_UMAP = False
 
 if not USE_UMAP:
