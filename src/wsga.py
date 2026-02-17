@@ -89,6 +89,7 @@ parser.add_argument("--fp_threshold", type=float, default=373, help="Min flash p
 parser.add_argument("--sc_threshold", type=float, default=3, help="Max SCScore")
 parser.add_argument("--tox_threshold", type=float, default=3, help="Max Tox21 score")
 parser.add_argument("--no_biodeg", action="store_true", help="Disable biodegradability filter")
+parser.add_argument("--tournament_k", type=int, default=3, help="Tournament selection size (k)")
 
 args = parser.parse_args()
 
@@ -105,6 +106,7 @@ ELITE_COUNT = int(GENERATION_SIZE * ELITISM_RATE)
 BASE_MUTATION_RATE = args.mutation_rate  # Base mutation rate
 NUM_GENERATIONS = args.num_generations
 FRAGMENT_LIMIT = 2000
+TOURNAMENT_K = args.tournament_k
 
 # Elite Selection Split
 # - BEST_ELITE_RATIO of elites are selected by raw FitnessScore (guaranteed best performers)
@@ -179,6 +181,7 @@ print(f"  - Best by FitnessScore: {BEST_ELITE_COUNT} ({BEST_ELITE_RATIO*100:.0f}
 print(f"  - Best by NichedFitness: {DIVERSE_ELITE_COUNT} ({(1-BEST_ELITE_RATIO)*100:.0f}%)")
 print(f"Elitism rate: {ELITISM_RATE}")
 print(f"Base mutation rate: {BASE_MUTATION_RATE}")
+print(f"Tournament k: {TOURNAMENT_K}")
 print(f"Tau (niching): {TAU}")
 print(f"Top N tracking: {TOP_N}")
 print(f"Model directory: {MODEL_DIR}")
@@ -610,8 +613,8 @@ def main():
 
         with tqdm(total=required_offspring, desc="Crossover") as pbar:
             while len(new_population_smiles) < required_offspring:
-                p1 = k_way_tournament(elite_df, k=3)
-                p2 = k_way_tournament(elite_df, k=3)
+                p1 = k_way_tournament(elite_df, k=TOURNAMENT_K)
+                p2 = k_way_tournament(elite_df, k=TOURNAMENT_K)
 
                 child = crossover_fragments(
                     p1, p2,

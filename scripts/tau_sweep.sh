@@ -1,32 +1,31 @@
 #!/bin/bash
-#PBS -N wsga_hyperparam
+#PBS -N wsga_tau_sweep
 #PBS -l walltime=72:00:00
 #PBS -l select=1:ncpus=1:mem=32gb
-#PBS -J 0-639
+#PBS -J 0-39
 #PBS -o /dev/null
 #PBS -e /dev/null
 
 # ============================================================
-# Hyperparameter Sweep — Stage 1: GA Mechanics
+# Tau / Niching Sweep — Stage 2
 # ============================================================
 #
+# Uses the best GA hyperparameters from Stage 1 (update below)
+# and sweeps tau to characterise the niching penalty.
+#
 # Parameters swept:
-#   - Population size:   [1000, 1500, 2000, 2500, 3000]  (5)
-#   - Mutation rate:     [0.5, 0.8]                       (2)
-#   - Elitism rate:      [0.1, 0.2, 0.3, 0.4]            (4)
-#   - Tournament k:      [2, 3, 5, 7]                     (4)
-#   - Seeds:             [42, 123, 7, 256]                (4)
+#   - Tau (niching):  [0.0, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50]  (8)
+#   - Seeds:          [42, 123, 7, 256, 999]                              (5)
 #
-# Fixed:
-#   - Tau = 0.15 (tuned separately in Stage 2)
-#   - Generations = 150
-#   - Biodegradability filter ON
+# Total: 8 * 5 = 40 jobs
 #
-# Total: 5 * 2 * 4 * 4 * 4 = 640 jobs
+# IMPORTANT: Update the "Best GA parameters from Stage 1" section
+#            below with the results of analyse_hyperparam_sweep.py
+#            before submitting this sweep.
 #
 # Usage:
-#   qsub hyperparam_sweep.sh
-#   qsub -J 0-0 hyperparam_sweep.sh   # single test job
+#   qsub tau_sweep.sh
+#   qsub -J 0-0 tau_sweep.sh   # single test job
 # ============================================================
 
 DIRECTORY="$PBS_O_WORKDIR"
@@ -37,7 +36,7 @@ if [ -z "$N" ]; then
         N=$1
         DIRECTORY=$(pwd)
     else
-        echo "Usage: bash hyperparam_sweep.sh <array_index>"
+        echo "Usage: bash tau_sweep.sh <array_index>"
         exit 1
     fi
 fi
@@ -47,47 +46,35 @@ conda activate rdkit_env
 cd "$DIRECTORY"
 
 # ==============================
-# Parameter grid
+# Best GA parameters from Stage 1
+# (UPDATE THESE after running analyse_hyperparam_sweep.py)
 # ==============================
-pop_values=(1000 1500 2000 2500 3000)
-mr_values=(0.5 0.8)
-er_values=(0.1 0.2 0.3 0.4)
-k_values=(2 3 5 7)
-seeds=(42 123 7 256)
+POP=2000
+MR=0.8
+ER=0.3
+K=3
+NUM_GENERATIONS=150
+
+# ==============================
+# Tau sweep grid
+# ==============================
+tau_values=(0.0 0.05 0.10 0.15 0.20 0.30 0.40 0.50)
+seeds=(42 123 7 256 999)
 
 # ==============================
 # Decode array index
 # ==============================
-n_pop=${#pop_values[@]}
-n_mr=${#mr_values[@]}
-n_er=${#er_values[@]}
-n_k=${#k_values[@]}
+n_tau=${#tau_values[@]}
 n_seed=${#seeds[@]}
 
 seed_idx=$((N % n_seed))
-remaining=$((N / n_seed))
+tau_idx=$((N / n_seed))
 
-k_idx=$((remaining % n_k))
-remaining=$((remaining / n_k))
-
-er_idx=$((remaining % n_er))
-remaining=$((remaining / n_er))
-
-mr_idx=$((remaining % n_mr))
-remaining=$((remaining / n_mr))
-
-pop_idx=$((remaining % n_pop))
-
-POP=${pop_values[$pop_idx]}
-MR=${mr_values[$mr_idx]}
-ER=${er_values[$er_idx]}
-K=${k_values[$k_idx]}
+TAU=${tau_values[$tau_idx]}
 SEED=${seeds[$seed_idx]}
-NUM_GENERATIONS=150
 
 # Fixed parameters
 TARGET="FOM1"
-TAU=0.15
 MP_SOFT=-30
 MP_HARD=-10
 FP_THRESHOLD=373
@@ -99,20 +86,20 @@ TOX_THRESHOLD=3
 # ==============================
 # Setup output directory
 # ==============================
-output_dir="../outputs/hyperparam_sweep/pop${POP}_mr${MR}_er${ER}_k${K}_seed${SEED}"
+output_dir="../outputs/tau_sweep/tau${TAU}_seed${SEED}"
 mkdir -p "$output_dir"
 
 log_file="${output_dir}/config.log"
 echo "========================================" > "$log_file"
-echo "WSGA Hyperparameter Sweep — Stage 1" >> "$log_file"
+echo "WSGA Tau Sweep — Stage 2" >> "$log_file"
 echo "========================================" >> "$log_file"
 echo "Array index:       $N" >> "$log_file"
 echo "Target:            $TARGET" >> "$log_file"
-echo "Population size:   $POP" >> "$log_file"
-echo "Mutation rate:     $MR" >> "$log_file"
-echo "Elitism rate:      $ER" >> "$log_file"
-echo "Tournament k:      $K" >> "$log_file"
-echo "Tau (niching):     $TAU (fixed)" >> "$log_file"
+echo "Population size:   $POP (from Stage 1)" >> "$log_file"
+echo "Mutation rate:     $MR (from Stage 1)" >> "$log_file"
+echo "Elitism rate:      $ER (from Stage 1)" >> "$log_file"
+echo "Tournament k:      $K (from Stage 1)" >> "$log_file"
+echo "Tau (niching):     $TAU" >> "$log_file"
 echo "Generations:       $NUM_GENERATIONS" >> "$log_file"
 echo "Seed label:        $SEED" >> "$log_file"
 echo "MP soft/hard:      ${MP_SOFT}/${MP_HARD}" >> "$log_file"

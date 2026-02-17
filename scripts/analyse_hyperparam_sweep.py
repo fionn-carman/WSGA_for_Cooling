@@ -5,15 +5,16 @@ Parses output directories from hyperparam_sweep.sh, extracts the top
 molecules and generation stats from each run, and identifies the best
 hyperparameter configurations.
 
+Supports two directory naming formats:
+  Stage 1: pop{}_mr{}_er{}_k{}_seed{}    (GA mechanics sweep)
+  Legacy:  pop{}_mr{}_er{}_tau{}_seed{}   (original sweep)
+
 Ranking approach:
   - For each run, read the final top-25 CSV and take the #1 molecule
     (by FitnessScore) and the mean FOM1_avg of the top 10.
-  - Group the 3 repeat seeds per hyperparameter config and compute
+  - Group the repeat seeds per hyperparameter config and compute
     the mean and std of both metrics across repeats.
-  - Rank configurations by mean #1 FOM1_avg across repeats (most
-    robust indicator -- a config that flukes one good molecule but
-    has poor top-10 average is less useful than one that reliably
-    produces a strong population).
+  - Rank configurations by mean #1 FOM1_avg across repeats.
   - Also report FOM1_40 and FOM1_100 breakdowns for the top configs.
   - Collect the best unique molecules across all runs.
 
@@ -22,6 +23,8 @@ Figures generated:
   2. Marginal box plots showing isolated effect of each parameter
   3. Convergence curves (best fitness vs generation) for top configs
   4. Parallel coordinates plot coloured by FOM1_avg
+  5. Structural similarity heatmap of top molecules (Tanimoto)
+  6. Murcko scaffold distribution bar chart
 
 Usage:
     python analyse_hyperparam_sweep.py --sweep_dir ../outputs/hyperparam_sweep
@@ -41,6 +44,7 @@ from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
 import matplotlib.ticker as ticker
 from itertools import combinations
+from collections import Counter
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -50,18 +54,35 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # ======================================================================
 
 def parse_run_dir(dirname):
-    """Extract hyperparameters from directory name."""
-    pattern = r"pop(\d+)_mr([\d.]+)_er([\d.]+)_tau([\d.]+)_seed(\d+)"
-    m = re.match(pattern, dirname)
-    if not m:
-        return None
-    return {
-        "pop": int(m.group(1)),
-        "mr": float(m.group(2)),
-        "er": float(m.group(3)),
-        "tau": float(m.group(4)),
-        "seed": int(m.group(5)),
-    }
+    """Extract hyperparameters from directory name.
+
+    Supports both Stage 1 format (with k) and legacy format (with tau).
+    """
+    # Stage 1 format: pop{}_mr{}_er{}_k{}_seed{}
+    m = re.match(r"pop(\d+)_mr([\d.]+)_er([\d.]+)_k(\d+)_seed(\d+)", dirname)
+    if m:
+        return {
+            "pop": int(m.group(1)),
+            "mr": float(m.group(2)),
+            "er": float(m.group(3)),
+            "k": int(m.group(4)),
+            "seed": int(m.group(5)),
+            "format": "stage1",
+        }
+
+    # Legacy format: pop{}_mr{}_er{}_tau{}_seed{}
+    m = re.match(r"pop(\d+)_mr([\d.]+)_er([\d.]+)_tau([\d.]+)_seed(\d+)", dirname)
+    if m:
+        return {
+            "pop": int(m.group(1)),
+            "mr": float(m.group(2)),
+            "er": float(m.group(3)),
+            "tau": float(m.group(4)),
+            "seed": int(m.group(5)),
+            "format": "legacy",
+        }
+
+    return None
 
 
 def safe_read_csv(path):
@@ -102,11 +123,16 @@ def plot_pairwise_heatmaps(runs_df, group_cols, out_dir):
     """Heatmap of mean #1 FOM1_avg for each pair of parameters."""
     pairs = list(combinations(group_cols, 2))
     n = len(pairs)
-    fig, axes = plt.subplots(2, 3, figsize=(16, 10))
-    axes = axes.flatten()
+    ncols = min(3, n)
+    nrows = (n + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5.5 * ncols, 5 * nrows))
+    if n == 1:
+        axes = np.array([axes])
+    axes = np.array(axes).flatten()
 
     param_labels = {"pop": "Population Size", "mr": "Mutation Rate",
-                    "er": "Elitism Rate", "tau": "Niching Threshold (τ)"}
+                    "er": "Elitism Rate", "k": "Tournament Size (k)",
+                    "tau": "Niching Threshold (τ)"}
 
     for idx, (p1, p2) in enumerate(pairs):
         ax = axes[idx]
@@ -133,7 +159,6 @@ def plot_pairwise_heatmaps(runs_df, group_cols, out_dir):
 
         plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-    # Hide unused subplot if odd number of pairs
     for idx in range(n, len(axes)):
         axes[idx].set_visible(False)
 
@@ -148,7 +173,8 @@ def plot_pairwise_heatmaps(runs_df, group_cols, out_dir):
 def plot_marginal_boxplots(runs_df, group_cols, out_dir):
     """Box plot of #1 FOM1_avg for each parameter value."""
     param_labels = {"pop": "Population Size", "mr": "Mutation Rate",
-                    "er": "Elitism Rate", "tau": "Niching Threshold (τ)"}
+                    "er": "Elitism Rate", "k": "Tournament Size (k)",
+                    "tau": "Niching Threshold (τ)"}
 
     fig, axes = plt.subplots(1, len(group_cols), figsize=(4 * len(group_cols), 5))
     if len(group_cols) == 1:
@@ -175,19 +201,24 @@ def plot_marginal_boxplots(runs_df, group_cols, out_dir):
     print(f"  Saved: boxplots_marginal.png/pdf")
 
 
-def plot_convergence_curves(runs_df, sweep_dir, out_dir, top_n=5):
+def plot_convergence_curves(runs_df, group_cols, sweep_dir, out_dir, top_n=5):
     """Convergence curves for the top N configs (averaged over seeds)."""
-    group_cols = ["pop", "mr", "er", "tau"]
     config_means = runs_df.groupby(group_cols)["best_FOM1_avg"].mean()
     top_configs = config_means.sort_values(ascending=False).head(top_n)
 
     fig, ax = plt.subplots(figsize=(10, 6))
     cmap = plt.cm.tab10
 
+    param_labels_short = {"pop": "pop", "mr": "mr", "er": "er",
+                          "k": "k", "tau": "τ"}
+
     for rank, (config, _) in enumerate(top_configs.items()):
-        pop, mr, er, tau = config
-        mask = ((runs_df["pop"] == pop) & (runs_df["mr"] == mr) &
-                (runs_df["er"] == er) & (runs_df["tau"] == tau))
+        if not isinstance(config, tuple):
+            config = (config,)
+
+        mask = pd.Series(True, index=runs_df.index)
+        for col, val in zip(group_cols, config):
+            mask &= (runs_df[col] == val)
         seed_dirs = runs_df.loc[mask, "dir"].tolist()
 
         all_gen_fitness = []
@@ -205,7 +236,8 @@ def plot_convergence_curves(runs_df, sweep_dir, out_dir, top_n=5):
         mean_curve = combined.mean(axis=1)
         std_curve = combined.std(axis=1)
 
-        label = f"pop={pop}, mr={mr}, er={er}, τ={tau}"
+        label = ", ".join(f"{param_labels_short.get(c, c)}={v}"
+                          for c, v in zip(group_cols, config))
         color = cmap(rank)
         ax.plot(mean_curve.index, mean_curve.values, label=label, color=color, linewidth=2)
         if len(all_gen_fitness) > 1:
@@ -229,7 +261,8 @@ def plot_convergence_curves(runs_df, sweep_dir, out_dir, top_n=5):
 def plot_parallel_coordinates(configs_df, group_cols, out_dir):
     """Parallel coordinates plot coloured by mean #1 FOM1_avg."""
     param_labels = {"pop": "Population\nSize", "mr": "Mutation\nRate",
-                    "er": "Elitism\nRate", "tau": "Niching\nThreshold (τ)"}
+                    "er": "Elitism\nRate", "k": "Tournament\nSize (k)",
+                    "tau": "Niching\nThreshold (τ)"}
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -246,7 +279,6 @@ def plot_parallel_coordinates(configs_df, group_cols, out_dir):
     norm = Normalize(vmin=plot_df[metric_col].min(), vmax=plot_df[metric_col].max())
     cmap = plt.cm.viridis
 
-    # Normalise each parameter to [0, 1] for plotting
     normed = {}
     for col in group_cols:
         vals = plot_df[col].values.astype(float)
@@ -258,14 +290,12 @@ def plot_parallel_coordinates(configs_df, group_cols, out_dir):
 
     x_positions = np.arange(len(group_cols))
 
-    # Sort by metric so best lines are drawn on top
     order = plot_df[metric_col].argsort().values
     for idx in order:
         y = [normed[col][idx] for col in group_cols]
         color = cmap(norm(plot_df[metric_col].iloc[idx]))
         ax.plot(x_positions, y, color=color, alpha=0.5, linewidth=1.2)
 
-    # Axis ticks: show actual parameter values
     for i, col in enumerate(group_cols):
         unique_vals = sorted(plot_df[col].unique())
         vals_float = np.array(unique_vals, dtype=float)
@@ -299,6 +329,138 @@ def plot_parallel_coordinates(configs_df, group_cols, out_dir):
     print(f"  Saved: parallel_coordinates.png/pdf")
 
 
+def plot_structural_similarity(top_unique, smiles_col, out_dir, n_mols=50):
+    """Pairwise Tanimoto similarity heatmap of top molecules."""
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import AllChem, DataStructs
+    except ImportError:
+        print("  Skipping structural similarity (RDKit not available)")
+        return
+
+    smiles_list = top_unique.head(n_mols)[smiles_col].tolist()
+    fps = []
+    valid_smiles = []
+    for smi in smiles_list:
+        mol = Chem.MolFromSmiles(smi)
+        if mol:
+            fps.append(AllChem.GetMorganFingerprintAsBitVect(mol, 2, nBits=2048))
+            valid_smiles.append(smi)
+
+    if len(fps) < 3:
+        print("  Skipping structural similarity (too few valid molecules)")
+        return
+
+    n = len(fps)
+    sim_matrix = np.zeros((n, n))
+    for i in range(n):
+        for j in range(n):
+            sim_matrix[i, j] = DataStructs.TanimotoSimilarity(fps[i], fps[j])
+
+    # Report summary stats
+    upper_tri = sim_matrix[np.triu_indices(n, k=1)]
+    print(f"\n  Structural Diversity (top {n} molecules):")
+    print(f"    Mean pairwise Tanimoto: {upper_tri.mean():.3f}")
+    print(f"    Median:                 {np.median(upper_tri):.3f}")
+    print(f"    Min:                    {upper_tri.min():.3f}")
+    print(f"    Max:                    {upper_tri.max():.3f}")
+    if upper_tri.mean() > 0.6:
+        print(f"    WARNING: High mean similarity suggests convergence to a local optimum")
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    im = ax.imshow(sim_matrix, cmap="YlOrRd", vmin=0, vmax=1)
+    ax.set_xlabel("Molecule Rank", fontsize=12)
+    ax.set_ylabel("Molecule Rank", fontsize=12)
+    ax.set_title(f"Pairwise Tanimoto Similarity — Top {n} Molecules", fontsize=14)
+
+    # Tick every 5 molecules
+    tick_step = max(1, n // 10)
+    ax.set_xticks(range(0, n, tick_step))
+    ax.set_xticklabels(range(1, n + 1, tick_step), fontsize=9)
+    ax.set_yticks(range(0, n, tick_step))
+    ax.set_yticklabels(range(1, n + 1, tick_step), fontsize=9)
+
+    cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label("Tanimoto Similarity", fontsize=11)
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, "structural_similarity_heatmap.png"),
+                dpi=300, bbox_inches="tight")
+    fig.savefig(os.path.join(out_dir, "structural_similarity_heatmap.pdf"),
+                bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: structural_similarity_heatmap.png/pdf")
+
+    return sim_matrix, valid_smiles
+
+
+def plot_scaffold_distribution(top_unique, smiles_col, out_dir, n_mols=50, top_scaffolds=10):
+    """Murcko scaffold decomposition and frequency bar chart."""
+    try:
+        from rdkit import Chem
+        from rdkit.Chem.Scaffolds import MurckoScaffold
+    except ImportError:
+        print("  Skipping scaffold analysis (RDKit not available)")
+        return
+
+    smiles_list = top_unique.head(n_mols)[smiles_col].tolist()
+    scaffolds = []
+    for smi in smiles_list:
+        mol = Chem.MolFromSmiles(smi)
+        if mol:
+            try:
+                core = MurckoScaffold.GetScaffoldForMol(mol)
+                generic = MurckoScaffold.MakeScaffoldGeneric(core)
+                scaffolds.append(Chem.MolToSmiles(generic))
+            except Exception:
+                scaffolds.append("(failed)")
+
+    if not scaffolds:
+        print("  Skipping scaffold analysis (no valid molecules)")
+        return
+
+    scaffold_counts = Counter(scaffolds)
+    n_unique_scaffolds = len(scaffold_counts)
+    top_sc = scaffold_counts.most_common(top_scaffolds)
+
+    print(f"\n  Scaffold Analysis (top {len(smiles_list)} molecules):")
+    print(f"    Unique Murcko scaffolds: {n_unique_scaffolds}")
+    print(f"    Most common scaffolds:")
+    for sc, count in top_sc:
+        pct = 100 * count / len(scaffolds)
+        print(f"      {sc:<50s}  {count:>3d} ({pct:.1f}%)")
+
+    if n_unique_scaffolds <= 3:
+        print(f"    WARNING: Very few unique scaffolds — strong evidence of local optimum")
+
+    # Bar chart
+    fig, ax = plt.subplots(figsize=(12, 5))
+    labels = [sc for sc, _ in top_sc]
+    counts = [c for _, c in top_sc]
+
+    # Truncate long SMILES for display
+    display_labels = [s if len(s) <= 30 else s[:27] + "..." for s in labels]
+
+    bars = ax.barh(range(len(counts)), counts, color="#4C72B0", alpha=0.8)
+    ax.set_yticks(range(len(counts)))
+    ax.set_yticklabels(display_labels, fontsize=9, fontfamily="monospace")
+    ax.set_xlabel("Count", fontsize=12)
+    ax.set_title(f"Top {top_scaffolds} Murcko Scaffolds (from top {len(smiles_list)} molecules)", fontsize=14)
+    ax.invert_yaxis()
+
+    for bar, count in zip(bars, counts):
+        ax.text(bar.get_width() + 0.3, bar.get_y() + bar.get_height() / 2,
+                str(count), va="center", fontsize=10)
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, "scaffold_distribution.png"),
+                dpi=300, bbox_inches="tight")
+    fig.savefig(os.path.join(out_dir, "scaffold_distribution.pdf"),
+                bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: scaffold_distribution.png/pdf")
+
+
 # ======================================================================
 # Main analysis
 # ======================================================================
@@ -310,6 +472,7 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
     # ------------------------------------------------------------------
     runs = []
     skipped = 0
+    detected_format = None
     for dirname in sorted(os.listdir(sweep_dir)):
         run_path = os.path.join(sweep_dir, dirname)
         if not os.path.isdir(run_path):
@@ -317,6 +480,9 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
         params = parse_run_dir(dirname)
         if params is None:
             continue
+
+        if detected_format is None:
+            detected_format = params["format"]
 
         top_df = load_top_molecules(run_path)
         if top_df is None:
@@ -329,7 +495,9 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
         top10 = top_df.head(10)
 
         run_info = {
-            **params,
+            k: v for k, v in params.items() if k != "format"
+        }
+        run_info.update({
             "dir": dirname,
             "best_FOM1_avg": best.get("FOM1_avg", np.nan),
             "best_FOM1_40": best.get("FOM1_40", np.nan),
@@ -340,7 +508,7 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
             "top10_mean_FOM1_40": top10["FOM1_40"].mean() if "FOM1_40" in top10.columns else np.nan,
             "top10_mean_FOM1_100": top10["FOM1_100"].mean() if "FOM1_100" in top10.columns else np.nan,
             "n_valid_top25": int(top_df["is_valid"].sum()) if "is_valid" in top_df.columns else len(top_df),
-        }
+        })
 
         if gen_stats is not None and not gen_stats.empty:
             run_info["final_gen"] = int(gen_stats["generation"].max())
@@ -357,12 +525,20 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
         return
 
     runs_df = pd.DataFrame(runs)
-    print(f"Found {len(runs_df)} completed runs (skipped {skipped} incomplete)\n")
+    print(f"Found {len(runs_df)} completed runs (skipped {skipped} incomplete)")
+    print(f"Directory format: {detected_format}\n")
 
     # ------------------------------------------------------------------
-    # 2. Aggregate across seeds per config
+    # 2. Determine group columns based on detected format
     # ------------------------------------------------------------------
-    group_cols = ["pop", "mr", "er", "tau"]
+    if detected_format == "stage1":
+        group_cols = ["pop", "mr", "er", "k"]
+    else:
+        group_cols = ["pop", "mr", "er", "tau"]
+
+    # ------------------------------------------------------------------
+    # 3. Aggregate across seeds per config
+    # ------------------------------------------------------------------
     metric_cols = [
         "best_FOM1_avg", "best_FOM1_40", "best_FOM1_100",
         "top10_mean_FOM1_avg", "top10_mean_FOM1_40", "top10_mean_FOM1_100",
@@ -378,20 +554,25 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
     ]
 
     # ------------------------------------------------------------------
-    # 3. Report best configs
+    # 4. Report best configs
     # ------------------------------------------------------------------
     configs = configs.sort_values("best_FOM1_avg_mean", ascending=False)
     show = configs.head(top_n_configs)
 
     n_seeds = int(show["best_FOM1_avg_count"].iloc[0])
 
+    # Build header dynamically based on group cols
+    param_headers = {"pop": ("Pop", 6), "mr": ("MR", 5), "er": ("ER", 5),
+                     "k": ("k", 4), "tau": ("Tau", 6)}
+
     print(f"{'='*90}")
     print(f"  TOP {top_n_configs} HYPERPARAMETER CONFIGS (ranked by mean #1 FOM1_avg across {n_seeds} seeds)")
     print(f"{'='*90}\n")
 
-    print(f"{'Rank':<5} {'Pop':<6} {'MR':<5} {'ER':<5} {'Tau':<6} "
-          f"{'#1 FOM1_avg':>16}   {'Top10 FOM1_avg':>18}   "
-          f"{'#1 FOM1_40':>10} {'#1 FOM1_100':>11}")
+    header = f"{'Rank':<5} "
+    header += " ".join(f"{param_headers[c][0]:<{param_headers[c][1]}}" for c in group_cols)
+    header += f" {'#1 FOM1_avg':>16}   {'Top10 FOM1_avg':>18}   {'#1 FOM1_40':>10} {'#1 FOM1_100':>11}"
+    print(header)
     print("-" * 105)
 
     for i, (_, row) in enumerate(show.iterrows(), 1):
@@ -399,16 +580,25 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
         std_10 = row["top10_mean_FOM1_avg_std"]
         s1 = f"{std_1:.4f}" if not np.isnan(std_1) else "  n/a"
         s10 = f"{std_10:.4f}" if not np.isnan(std_10) else "  n/a"
-        print(
-            f"{i:<5} {row['pop']:<6.0f} {row['mr']:<5.1f} {row['er']:<5.1f} {row['tau']:<6.2f} "
-            f"{row['best_FOM1_avg_mean']:>10.4f} +/- {s1}"
-            f"   {row['top10_mean_FOM1_avg_mean']:>10.4f} +/- {s10}"
-            f"   {row['best_FOM1_40_mean']:>10.4f}"
-            f"   {row['best_FOM1_100_mean']:>10.4f}"
-        )
+
+        line = f"{i:<5} "
+        for c in group_cols:
+            w = param_headers[c][1]
+            val = row[c]
+            if isinstance(val, float) and val == int(val):
+                line += f"{int(val):<{w}} "
+            elif isinstance(val, float):
+                line += f"{val:<{w}.2f} "
+            else:
+                line += f"{val:<{w}} "
+        line += (f"{row['best_FOM1_avg_mean']:>10.4f} +/- {s1}"
+                 f"   {row['top10_mean_FOM1_avg_mean']:>10.4f} +/- {s10}"
+                 f"   {row['best_FOM1_40_mean']:>10.4f}"
+                 f"   {row['best_FOM1_100_mean']:>10.4f}")
+        print(line)
 
     # ------------------------------------------------------------------
-    # 4. Per-parameter marginal analysis
+    # 5. Per-parameter marginal analysis
     # ------------------------------------------------------------------
     print(f"\n{'='*90}")
     print(f"  MARGINAL EFFECT OF EACH PARAMETER (mean #1 FOM1_avg)")
@@ -423,7 +613,7 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
         print()
 
     # ------------------------------------------------------------------
-    # 5. Collect best unique molecules across all runs
+    # 6. Collect best unique molecules across all runs
     # ------------------------------------------------------------------
     all_top_mols = []
     for _, run in runs_df.iterrows():
@@ -432,12 +622,12 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
         if top_df is None:
             continue
         top_df = top_df.copy()
-        top_df["source_config"] = (
-            f"pop{run['pop']}_mr{run['mr']}_er{run['er']}_tau{run['tau']}"
-        )
+        config_parts = [f"{c}{run[c]}" for c in group_cols]
+        top_df["source_config"] = "_".join(config_parts)
         top_df["source_seed"] = run["seed"]
         all_top_mols.append(top_df)
 
+    top_unique = None
     if all_top_mols:
         combined = pd.concat(all_top_mols, ignore_index=True)
         smiles_col = "CanonicalSMILES" if "CanonicalSMILES" in combined.columns else "SMILES"
@@ -470,7 +660,7 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
             )
 
     # ------------------------------------------------------------------
-    # 6. Save CSVs
+    # 7. Save CSVs
     # ------------------------------------------------------------------
     out_dir = os.path.join(sweep_dir, "analysis")
     os.makedirs(out_dir, exist_ok=True)
@@ -478,7 +668,7 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
     runs_df.to_csv(os.path.join(out_dir, "all_runs.csv"), index=False)
     configs.to_csv(os.path.join(out_dir, "configs_aggregated.csv"), index=False)
 
-    if all_top_mols:
+    if top_unique is not None:
         top_unique.to_csv(
             os.path.join(out_dir, "top_molecules.csv"), index=False
         )
@@ -486,17 +676,23 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
     print(f"\nCSVs saved to: {out_dir}/")
     print(f"  all_runs.csv            - per-run metrics ({len(runs_df)} runs)")
     print(f"  configs_aggregated.csv  - configs averaged over seeds ({len(configs)} configs)")
-    print(f"  top_molecules.csv       - best {top_n_molecules} unique molecules")
+    if top_unique is not None:
+        print(f"  top_molecules.csv       - best {top_n_molecules} unique molecules")
 
     # ------------------------------------------------------------------
-    # 7. Generate figures
+    # 8. Generate figures
     # ------------------------------------------------------------------
     print(f"\nGenerating figures...")
 
     plot_pairwise_heatmaps(runs_df, group_cols, out_dir)
     plot_marginal_boxplots(runs_df, group_cols, out_dir)
-    plot_convergence_curves(runs_df, sweep_dir, out_dir, top_n=5)
+    plot_convergence_curves(runs_df, group_cols, sweep_dir, out_dir, top_n=5)
     plot_parallel_coordinates(configs, group_cols, out_dir)
+
+    # Structural diversity analysis
+    if top_unique is not None:
+        plot_structural_similarity(top_unique, smiles_col, out_dir, n_mols=top_n_molecules)
+        plot_scaffold_distribution(top_unique, smiles_col, out_dir, n_mols=top_n_molecules)
 
     print(f"\nDone.")
 
