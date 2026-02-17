@@ -258,14 +258,14 @@ def select_extreme_configs(sweep_dir, max_configs=8):
         min_val = min(info["params"][param] for _, info in configs_with_param)
         max_val = max(info["params"][param] for _, info in configs_with_param)
 
-        min_configs = [(ck, info) for ck, info in configs_with_param
-                       if info["params"][param] == min_val]
-        max_configs = [(ck, info) for ck, info in configs_with_param
-                       if info["params"][param] == max_val]
+        min_param_configs = [(ck, info) for ck, info in configs_with_param
+                             if info["params"][param] == min_val]
+        max_param_configs = [(ck, info) for ck, info in configs_with_param
+                             if info["params"][param] == max_val]
 
         # Best performer at each extreme
-        best_at_min = max(min_configs, key=lambda x: x[1]["mean_fom"])[0]
-        best_at_max = max(max_configs, key=lambda x: x[1]["mean_fom"])[0]
+        best_at_min = max(min_param_configs, key=lambda x: x[1]["mean_fom"])[0]
+        best_at_max = max(max_param_configs, key=lambda x: x[1]["mean_fom"])[0]
 
         selected_keys.add(best_at_min)
         selected_keys.add(best_at_max)
