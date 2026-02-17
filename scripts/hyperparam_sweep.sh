@@ -10,30 +10,24 @@
 # Hyperparameter Sweep for WSGA
 # ============================================================
 #
-# Sweeps across key GA hyperparameters while holding the
-# optimisation target and validity thresholds fixed.
-#
 # Parameters swept:
-#   - Population size:  [500, 750, 1000, 1500, 2000]    (5 values)
-#   - Mutation rate:    [0.5, 0.6, 0.7, 0.8, 0.9]       (5 values - scaled by adaptive system)
-#   - Elitism rate:     [0.1, 0.2, 0.3, 0.4]             (4 values)
-#   - Tau (niching):    [0.05, 0.10, 0.15, 0.20]         (4 values)
-#   - Num generations:  [100, 200]                        (2 values - convergence check)
-#   - Biodegradability: [yes, no]                         (2 values - optional filter)
+#   - Population size:  [500, 750, 1000, 1500, 2000]  (5)
+#   - Mutation rate:    [0.5, 0.7, 0.8, 0.9]          (4)
+#   - Elitism rate:     [0.1, 0.2, 0.3, 0.4]          (4)
+#   - Tau (niching):    [0.05, 0.10, 0.15, 0.20]      (4)
+#   - Seeds:            [42, 123, 7]                   (3)
 #
-# Total combinations: 5 * 5 * 4 * 4 * 2 * ~6 seed/target combos...
-# We use: 5 * 4 * 4 * 4 * 3 * 1 = 960 jobs (target=FOM1, 3 random seeds)
+# Total: 5 * 4 * 4 * 4 * 3 = 960 jobs
+# Biodegradability filter is ON for all runs.
 #
 # Usage:
-#   qsub hyperparam_sweep.sh                  # Submit all jobs
-#   qsub -J 0-0 hyperparam_sweep.sh           # Submit single test job
-#
+#   qsub hyperparam_sweep.sh
+#   qsub -J 0-0 hyperparam_sweep.sh   # single test job
 # ============================================================
 
 DIRECTORY="$PBS_O_WORKDIR"
 N=${PBS_ARRAY_INDEX}
 
-# If running locally, accept array index as argument
 if [ -z "$N" ]; then
     if [ $# -eq 1 ]; then
         N=$1
@@ -55,7 +49,6 @@ pop_values=(500 750 1000 1500 2000)
 mr_values=(0.5 0.7 0.8 0.9)
 er_values=(0.1 0.2 0.3 0.4)
 tau_values=(0.05 0.10 0.15 0.20)
-gen_values=(100 200)
 seeds=(42 123 7)
 
 # ==============================
@@ -65,13 +58,7 @@ n_pop=${#pop_values[@]}
 n_mr=${#mr_values[@]}
 n_er=${#er_values[@]}
 n_tau=${#tau_values[@]}
-n_gen=${#gen_values[@]}
 n_seed=${#seeds[@]}
-
-# Total = 5 * 4 * 4 * 4 * 2 * 3 = 1920
-# Using: 5 * 4 * 4 * 4 * 2 * 3 = 1920 but we can reduce:
-# Final: pop * mr * er * tau * seed = 5*4*4*4*3 = 960
-# (We fix generations=200 for main sweep, 100 for quick check in separate run)
 
 seed_idx=$((N % n_seed))
 remaining=$((N / n_seed))
@@ -110,7 +97,6 @@ TOX_THRESHOLD=3
 output_dir="../outputs/hyperparam_sweep/pop${POP}_mr${MR}_er${ER}_tau${TAU}_seed${SEED}"
 mkdir -p "$output_dir"
 
-# Log configuration
 log_file="${output_dir}/config.log"
 echo "========================================" > "$log_file"
 echo "WSGA Hyperparameter Sweep" >> "$log_file"
@@ -122,7 +108,7 @@ echo "Mutation rate:     $MR" >> "$log_file"
 echo "Elitism rate:      $ER" >> "$log_file"
 echo "Tau (niching):     $TAU" >> "$log_file"
 echo "Generations:       $NUM_GENERATIONS" >> "$log_file"
-echo "Random seed:       $SEED" >> "$log_file"
+echo "Seed label:        $SEED" >> "$log_file"
 echo "MP soft/hard:      ${MP_SOFT}/${MP_HARD}" >> "$log_file"
 echo "FP threshold:      $FP_THRESHOLD" >> "$log_file"
 echo "Started at:        $(date)" >> "$log_file"
