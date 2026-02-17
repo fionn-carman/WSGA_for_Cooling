@@ -55,10 +55,25 @@ except ImportError:
 RDLogger.DisableLog("rdApp.*")
 
 try:
-    import umap
+    # Avoid importing parametric_umap which drags in TensorFlow
+    import umap.umap_ as umap_module
+    UMAP = umap_module.UMAP
+    USE_UMAP = True
 except ImportError:
-    print("ERROR: umap-learn is required. Install with: pip install umap-learn")
-    sys.exit(1)
+    try:
+        import umap
+        UMAP = umap.UMAP
+        USE_UMAP = True
+    except ImportError:
+        USE_UMAP = False
+
+if not USE_UMAP:
+    try:
+        from sklearn.manifold import TSNE
+        print("NOTE: umap-learn not available, falling back to t-SNE")
+    except ImportError:
+        print("ERROR: Need either umap-learn or scikit-learn. Install with: pip install umap-learn")
+        sys.exit(1)
 
 
 # ======================================================================
@@ -575,18 +590,31 @@ def analyse_chemical_space(run_dir=None, sweep_dir=None, data_dir=None,
     fp_matrix = fps_to_numpy(fps)
 
     # ------------------------------------------------------------------
-    # 6. UMAP projection
+    # 6. Dimensionality reduction (UMAP or t-SNE fallback)
     # ------------------------------------------------------------------
-    print(f"\nRunning UMAP (this may take a few minutes)...")
-    reducer = umap.UMAP(
-        n_neighbors=30,
-        min_dist=0.3,
-        metric="jaccard",
-        random_state=42,
-        n_jobs=1,
-    )
-    umap_coords = reducer.fit_transform(fp_matrix)
-    print(f"  UMAP complete: {umap_coords.shape}")
+    if USE_UMAP:
+        print(f"\nRunning UMAP (this may take a few minutes)...")
+        reducer = UMAP(
+            n_neighbors=30,
+            min_dist=0.3,
+            metric="jaccard",
+            random_state=42,
+            n_jobs=1,
+        )
+        coords_2d = reducer.fit_transform(fp_matrix)
+        print(f"  UMAP complete: {coords_2d.shape}")
+    else:
+        print(f"\nRunning t-SNE (this may take a few minutes)...")
+        reducer = TSNE(
+            n_components=2,
+            metric="jaccard",
+            random_state=42,
+            perplexity=min(30, len(fp_matrix) - 1),
+            n_iter=1000,
+        )
+        coords_2d = reducer.fit_transform(fp_matrix)
+        print(f"  t-SNE complete: {coords_2d.shape}")
+    umap_coords = coords_2d  # Keep variable name for downstream functions
 
     # ------------------------------------------------------------------
     # 7. Output directory
