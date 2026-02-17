@@ -1,32 +1,32 @@
 #!/bin/bash
 #PBS -N wsga_chem_space
-#PBS -l walltime=12:00:00
-#PBS -l select=1:ncpus=1:mem=96gb
+#PBS -l walltime=04:00:00
+#PBS -l select=1:ncpus=1:mem=64gb
 #PBS -o /dev/null
 #PBS -e /dev/null
 
 # ============================================================
-# Chemical Space Comparison — Two-step pipeline
+# Chemical Space Analysis — Single Top Configuration
 # ============================================================
 #
-# Step 1: Runs compute_chemical_space.py to generate reference
-#         molecules, load evaluated molecules from a selection
-#         of extreme hyperparameter configs, fit a single UMAP
-#         embedding, and save everything to a .npz file.
+# Generates publication-quality chemical space figures for the
+# top hyperparameter configuration identified by
+# analyse_hyperparam_sweep.py.
 #
-# Step 2: Runs compare_chemical_space.py to generate all
-#         comparison figures from the saved embedding.
+# Step 1: Generate 10k n-gram reference molecules (skips if
+#         data/ngram_reference_10k.csv already exists).
 #
-# This is a single job (not an array) because UMAP must be fit
-# on all molecules simultaneously for coordinates to be comparable.
+# Step 2: Run plot_chemical_space.py to compute shared UMAP,
+#         produce 6 figures (4 panels + combined grid + FG
+#         over generations), and print coverage statistics.
 #
-# Memory: 64 GB requested. With ~8 configs × 3 seeds × ~100k
-#         molecules each, plus 5k reference, the fingerprint
-#         matrix can be large. Adjust if needed.
+# Prerequisites:
+#   - analyse_hyperparam_sweep.py must have been run first
+#     (produces configs_aggregated.csv)
 #
 # Usage:
-#   qsub chemical_space_sweep.sh
-#   bash chemical_space_sweep.sh          # local run
+#   qsub chemical_space_sweep.sh       # submit to PBS
+#   bash chemical_space_sweep.sh       # run locally
 # ============================================================
 
 DIRECTORY="$PBS_O_WORKDIR"
@@ -39,27 +39,17 @@ eval "$(~/miniforge3/bin/conda shell.bash hook)"
 conda activate rdkit_env
 cd "$DIRECTORY"
 
-# Ensure pipe failures are caught (otherwise tee masks Python exit code)
+# Ensure pipe failures are caught
 set -o pipefail
 
 # ==============================
 # Configuration
 # ==============================
 
-# Sweep directory containing all hyperparam runs
 SWEEP_DIR="../outputs/hyperparam_sweep"
-
-# Data directory for reference molecule generation
 DATA_DIR="../data"
-
-# Output paths
-OUTPUT_DIR="../outputs/analysis/chemical_space_comparison"
-NPZ_FILE="${OUTPUT_DIR}/chemical_space_data.npz"
-
-# Parameters
-N_REF=5000                 # Reference molecules to generate
-MAX_CONFIGS=8              # Number of extreme configs to select
-SAMPLE_PER_SEED=50000      # Max molecules per seed run (keeps total manageable for UMAP)
+REF_CSV="../data/ngram_reference_10k.csv"
+OUTPUT_DIR="../outputs/analysis/chemical_space"
 
 mkdir -p "$OUTPUT_DIR"
 
@@ -68,30 +58,27 @@ mkdir -p "$OUTPUT_DIR"
 # ==============================
 log_file="${OUTPUT_DIR}/chemical_space.log"
 echo "========================================" > "$log_file"
-echo "Chemical Space Comparison Analysis" >> "$log_file"
+echo "Chemical Space Analysis (top config)" >> "$log_file"
 echo "========================================" >> "$log_file"
-echo "Sweep dir:       $SWEEP_DIR" >> "$log_file"
-echo "Data dir:        $DATA_DIR" >> "$log_file"
-echo "N reference:     $N_REF" >> "$log_file"
-echo "Max configs:     $MAX_CONFIGS" >> "$log_file"
-echo "Sample per seed: $SAMPLE_PER_SEED" >> "$log_file"
-echo "Started at:      $(date)" >> "$log_file"
+echo "Sweep dir:   $SWEEP_DIR" >> "$log_file"
+echo "Data dir:    $DATA_DIR" >> "$log_file"
+echo "Ref CSV:     $REF_CSV" >> "$log_file"
+echo "Output dir:  $OUTPUT_DIR" >> "$log_file"
+echo "Started at:  $(date)" >> "$log_file"
 echo "========================================" >> "$log_file"
 
 # ==============================
-# Step 1: Compute UMAP embedding
+# Step 1: Generate reference set
 # ==============================
 echo "" >> "$log_file"
-echo "=== Step 1: Computing UMAP embedding ===" >> "$log_file"
+echo "=== Step 1: Reference set ===" >> "$log_file"
 echo "" >> "$log_file"
 
-python3 compute_chemical_space.py \
-    --sweep_dir "$SWEEP_DIR" \
+python3 generate_reference_set.py \
     --data_dir "$DATA_DIR" \
-    --output "$NPZ_FILE" \
-    --n_ref $N_REF \
-    --max_configs $MAX_CONFIGS \
-    --sample_per_seed $SAMPLE_PER_SEED \
+    --output "$REF_CSV" \
+    --n_mol 10000 \
+    --seed 42 \
     2>&1 | tee -a "$log_file"
 
 step1_status=$?
@@ -103,15 +90,19 @@ if [ $step1_status -ne 0 ]; then
 fi
 
 # ==============================
-# Step 2: Generate comparison figures
+# Step 2: Chemical space analysis
 # ==============================
 echo "" >> "$log_file"
-echo "=== Step 2: Generating comparison figures ===" >> "$log_file"
+echo "=== Step 2: Chemical space analysis ===" >> "$log_file"
 echo "" >> "$log_file"
 
-python3 compare_chemical_space.py \
-    --input "$NPZ_FILE" \
+python3 plot_chemical_space.py \
+    --sweep_dir "$SWEEP_DIR" \
+    --data_dir "$DATA_DIR" \
+    --ref_csv "$REF_CSV" \
     --out_dir "$OUTPUT_DIR" \
+    --n_top 50 \
+    --sample_ga 50000 \
     2>&1 | tee -a "$log_file"
 
 step2_status=$?

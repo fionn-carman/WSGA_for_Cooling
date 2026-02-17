@@ -29,7 +29,9 @@ qsub fp_mp_sweep.sh
 ```
 
 ### `chemical_space_sweep.sh`
-Single PBS job (not an array) that runs the two-step chemical space comparison pipeline. Auto-selects 8 extreme hyperparameter configs from the sweep, generates 5000 reference molecules, fits a shared UMAP embedding on all molecules, then generates comparison figures. Requires 96 GB memory.
+Single PBS job that runs the chemical space analysis pipeline. Generates a 10k n-gram reference set (if not cached), identifies the top hyperparameter config from `configs_aggregated.csv`, loads all seeds for that config, fits a shared UMAP, and produces 6 publication-quality figures. Requires 64 GB memory.
+
+**Prerequisite:** `analyse_hyperparam_sweep.py` must have been run first.
 
 ```bash
 qsub chemical_space_sweep.sh
@@ -62,18 +64,27 @@ python analyse_chemical_space.py --run_dir ../outputs/hyperparam_sweep/pop2000_m
 python analyse_chemical_space.py --sweep_dir ../outputs/hyperparam_sweep --n_runs 5
 ```
 
-### `compute_chemical_space.py`
-Step 1 of the cross-config comparison pipeline. Auto-selects extreme configs from the sweep, pools all seeds per config, generates a shared reference set via the n-gram model, computes Morgan fingerprints, fits a single UMAP on the combined data, and saves everything to a `.npz` file. Called by `chemical_space_sweep.sh`.
+### `generate_reference_set.py`
+Standalone script to generate 10k molecules from the 8-gram model and save to `data/ngram_reference_10k.csv`. Uses fixed seed 42 for reproducibility. Skips generation if the output file already exists.
 
 ```bash
-python compute_chemical_space.py --sweep_dir ../outputs/hyperparam_sweep --data_dir ../data --output out.npz
+python generate_reference_set.py                  # generate with defaults
+python generate_reference_set.py --force           # regenerate even if exists
+python generate_reference_set.py --n_mol 5000      # custom count
 ```
 
-### `compare_chemical_space.py`
-Step 2 of the cross-config comparison pipeline. Loads the `.npz` from `compute_chemical_space.py` and generates: grid comparison panels, density contour overlay, coverage bar charts, search trajectories, functional group heatmap, reference FG panels, reference dominant FG map, and Murcko scaffold comparison.
+### `plot_chemical_space.py`
+Main chemical space visualisation script. Identifies the top config from `configs_aggregated.csv`, loads all seed runs, computes a shared UMAP embedding with the n-gram reference set, and produces 6 figures:
+- (a) Reference population coloured by dominant functional group
+- (b) GA coverage overlay on reference
+- (c) Exploration over time (generation colourmap)
+- (d) FOM1 fitness landscape
+- Combined 2x2 grid of (a)-(d)
+- Functional group prevalence vs generation line chart
 
 ```bash
-python compare_chemical_space.py --input ../outputs/analysis/chemical_space_comparison/chemical_space_data.npz
+python plot_chemical_space.py --sweep_dir ../outputs/hyperparam_sweep
+python plot_chemical_space.py --sweep_dir ../outputs/hyperparam_sweep --no_cache
 ```
 
 ### `plot_local_fg_umap.py`
@@ -92,7 +103,7 @@ python plot_local_fg_umap.py --n_mol 10000 --out_dir ../outputs/custom
 Stage 1: hyperparam_sweep.sh  -->  analyse_hyperparam_sweep.py
 Stage 2: tau_sweep.sh         -->  analyse_tau_sweep.py
 Chem space: chemical_space_sweep.sh
-              |-> compute_chemical_space.py (Step 1: UMAP fitting)
-              |-> compare_chemical_space.py (Step 2: figures)
+              |-> generate_reference_set.py  (Step 1: 10k reference set)
+              |-> plot_chemical_space.py      (Step 2: UMAP + 6 figures)
 Local FG vis: plot_local_fg_umap.py (standalone)
 ```
