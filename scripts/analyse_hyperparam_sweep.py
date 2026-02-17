@@ -11,11 +11,17 @@ Ranking approach:
   - Group the 3 repeat seeds per hyperparameter config and compute
     the mean and std of both metrics across repeats.
   - Rank configurations by mean #1 FOM1_avg across repeats (most
-    robust indicator — a config that flukes one good molecule but
+    robust indicator -- a config that flukes one good molecule but
     has poor top-10 average is less useful than one that reliably
     produces a strong population).
   - Also report FOM1_40 and FOM1_100 breakdowns for the top configs.
   - Collect the best unique molecules across all runs.
+
+Figures generated:
+  1. Pairwise heatmaps of mean #1 FOM1_avg for each parameter pair
+  2. Marginal box plots showing isolated effect of each parameter
+  3. Convergence curves (best fitness vs generation) for top configs
+  4. Parallel coordinates plot coloured by FOM1_avg
 
 Usage:
     python analyse_hyperparam_sweep.py --sweep_dir ../outputs/hyperparam_sweep
@@ -25,15 +31,26 @@ Usage:
 import os
 import re
 import argparse
+import warnings
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
+from matplotlib.cm import ScalarMappable
+import matplotlib.ticker as ticker
+from itertools import combinations
 
+warnings.filterwarnings("ignore", category=FutureWarning)
+
+
+# ======================================================================
+# Data loading
+# ======================================================================
 
 def parse_run_dir(dirname):
-    """Extract hyperparameters from directory name.
-
-    Expected format: pop{}_mr{}_er{}_tau{}_seed{}
-    """
+    """Extract hyperparameters from directory name."""
     pattern = r"pop(\d+)_mr([\d.]+)_er([\d.]+)_tau([\d.]+)_seed(\d+)"
     m = re.match(pattern, dirname)
     if not m:
@@ -47,13 +64,26 @@ def parse_run_dir(dirname):
     }
 
 
+def safe_read_csv(path):
+    """Read a CSV, returning None if it's empty or corrupt."""
+    try:
+        if os.path.getsize(path) == 0:
+            return None
+        df = pd.read_csv(path)
+        if df.empty or len(df.columns) < 2:
+            return None
+        return df
+    except Exception:
+        return None
+
+
 def load_top_molecules(run_path):
     """Load the final top-25 CSV from a run directory."""
     candidates = [f for f in os.listdir(run_path)
                   if f.startswith("top_") and f.endswith(".csv")]
     if not candidates:
         return None
-    return pd.read_csv(os.path.join(run_path, candidates[0]))
+    return safe_read_csv(os.path.join(run_path, candidates[0]))
 
 
 def load_generation_stats(run_path):
@@ -61,8 +91,217 @@ def load_generation_stats(run_path):
     path = os.path.join(run_path, "generation_stats.csv")
     if not os.path.exists(path):
         return None
-    return pd.read_csv(path)
+    return safe_read_csv(path)
 
+
+# ======================================================================
+# Figures
+# ======================================================================
+
+def plot_pairwise_heatmaps(runs_df, group_cols, out_dir):
+    """Heatmap of mean #1 FOM1_avg for each pair of parameters."""
+    pairs = list(combinations(group_cols, 2))
+    n = len(pairs)
+    fig, axes = plt.subplots(2, 3, figsize=(16, 10))
+    axes = axes.flatten()
+
+    param_labels = {"pop": "Population Size", "mr": "Mutation Rate",
+                    "er": "Elitism Rate", "tau": "Niching Threshold (τ)"}
+
+    for idx, (p1, p2) in enumerate(pairs):
+        ax = axes[idx]
+        pivot = runs_df.groupby([p1, p2])["best_FOM1_avg"].mean().reset_index()
+        pivot = pivot.pivot(index=p2, columns=p1, values="best_FOM1_avg")
+        pivot = pivot.sort_index(ascending=False)
+
+        im = ax.imshow(pivot.values, aspect="auto", cmap="viridis")
+        ax.set_xticks(range(len(pivot.columns)))
+        ax.set_xticklabels(pivot.columns, fontsize=9)
+        ax.set_yticks(range(len(pivot.index)))
+        ax.set_yticklabels([f"{v:.2f}" if isinstance(v, float) else str(v)
+                            for v in pivot.index], fontsize=9)
+        ax.set_xlabel(param_labels.get(p1, p1), fontsize=11)
+        ax.set_ylabel(param_labels.get(p2, p2), fontsize=11)
+
+        # Annotate cells
+        for i in range(pivot.shape[0]):
+            for j in range(pivot.shape[1]):
+                val = pivot.values[i, j]
+                if not np.isnan(val):
+                    ax.text(j, i, f"{val:.3f}", ha="center", va="center",
+                            fontsize=8, color="white" if val < pivot.values[~np.isnan(pivot.values)].mean() else "black")
+
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    # Hide unused subplot if odd number of pairs
+    for idx in range(n, len(axes)):
+        axes[idx].set_visible(False)
+
+    fig.suptitle("Pairwise Hyperparameter Interaction — Mean Best FOM1", fontsize=14, y=1.01)
+    fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, "heatmaps_pairwise.png"), dpi=300, bbox_inches="tight")
+    fig.savefig(os.path.join(out_dir, "heatmaps_pairwise.pdf"), bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: heatmaps_pairwise.png/pdf")
+
+
+def plot_marginal_boxplots(runs_df, group_cols, out_dir):
+    """Box plot of #1 FOM1_avg for each parameter value."""
+    param_labels = {"pop": "Population Size", "mr": "Mutation Rate",
+                    "er": "Elitism Rate", "tau": "Niching Threshold (τ)"}
+
+    fig, axes = plt.subplots(1, len(group_cols), figsize=(4 * len(group_cols), 5))
+    if len(group_cols) == 1:
+        axes = [axes]
+
+    for ax, param in zip(axes, group_cols):
+        values = sorted(runs_df[param].unique())
+        data = [runs_df.loc[runs_df[param] == v, "best_FOM1_avg"].dropna().values
+                for v in values]
+        bp = ax.boxplot(data, labels=[str(v) for v in values], patch_artist=True,
+                        widths=0.6)
+        for patch in bp["boxes"]:
+            patch.set_facecolor("#4C72B0")
+            patch.set_alpha(0.7)
+        ax.set_xlabel(param_labels.get(param, param), fontsize=12)
+        ax.set_ylabel("Best FOM1 (avg)" if param == group_cols[0] else "", fontsize=12)
+        ax.tick_params(labelsize=10)
+
+    fig.suptitle("Marginal Effect of Each Hyperparameter on Best FOM1", fontsize=14)
+    fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, "boxplots_marginal.png"), dpi=300, bbox_inches="tight")
+    fig.savefig(os.path.join(out_dir, "boxplots_marginal.pdf"), bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: boxplots_marginal.png/pdf")
+
+
+def plot_convergence_curves(runs_df, sweep_dir, out_dir, top_n=5):
+    """Convergence curves for the top N configs (averaged over seeds)."""
+    group_cols = ["pop", "mr", "er", "tau"]
+    config_means = runs_df.groupby(group_cols)["best_FOM1_avg"].mean()
+    top_configs = config_means.sort_values(ascending=False).head(top_n)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    cmap = plt.cm.tab10
+
+    for rank, (config, _) in enumerate(top_configs.items()):
+        pop, mr, er, tau = config
+        mask = ((runs_df["pop"] == pop) & (runs_df["mr"] == mr) &
+                (runs_df["er"] == er) & (runs_df["tau"] == tau))
+        seed_dirs = runs_df.loc[mask, "dir"].tolist()
+
+        all_gen_fitness = []
+        for d in seed_dirs:
+            gs = load_generation_stats(os.path.join(sweep_dir, d))
+            if gs is None:
+                continue
+            if "FitnessScore_max" in gs.columns:
+                all_gen_fitness.append(gs.set_index("generation")["FitnessScore_max"])
+
+        if not all_gen_fitness:
+            continue
+
+        combined = pd.concat(all_gen_fitness, axis=1)
+        mean_curve = combined.mean(axis=1)
+        std_curve = combined.std(axis=1)
+
+        label = f"pop={pop}, mr={mr}, er={er}, τ={tau}"
+        color = cmap(rank)
+        ax.plot(mean_curve.index, mean_curve.values, label=label, color=color, linewidth=2)
+        if len(all_gen_fitness) > 1:
+            ax.fill_between(mean_curve.index,
+                            (mean_curve - std_curve).values,
+                            (mean_curve + std_curve).values,
+                            alpha=0.15, color=color)
+
+    ax.set_xlabel("Generation", fontsize=12)
+    ax.set_ylabel("Best Fitness Score", fontsize=12)
+    ax.set_title(f"Convergence Curves — Top {top_n} Configurations", fontsize=14)
+    ax.legend(fontsize=9, loc="lower right")
+    ax.tick_params(labelsize=10)
+    fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, "convergence_curves.png"), dpi=300, bbox_inches="tight")
+    fig.savefig(os.path.join(out_dir, "convergence_curves.pdf"), bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: convergence_curves.png/pdf")
+
+
+def plot_parallel_coordinates(configs_df, group_cols, out_dir):
+    """Parallel coordinates plot coloured by mean #1 FOM1_avg."""
+    param_labels = {"pop": "Population\nSize", "mr": "Mutation\nRate",
+                    "er": "Elitism\nRate", "tau": "Niching\nThreshold (τ)"}
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    metric_col = "best_FOM1_avg_mean"
+    if metric_col not in configs_df.columns:
+        plt.close(fig)
+        return
+
+    plot_df = configs_df.dropna(subset=[metric_col]).copy()
+    if plot_df.empty:
+        plt.close(fig)
+        return
+
+    norm = Normalize(vmin=plot_df[metric_col].min(), vmax=plot_df[metric_col].max())
+    cmap = plt.cm.viridis
+
+    # Normalise each parameter to [0, 1] for plotting
+    normed = {}
+    for col in group_cols:
+        vals = plot_df[col].values.astype(float)
+        vmin, vmax = vals.min(), vals.max()
+        if vmax > vmin:
+            normed[col] = (vals - vmin) / (vmax - vmin)
+        else:
+            normed[col] = np.zeros_like(vals)
+
+    x_positions = np.arange(len(group_cols))
+
+    # Sort by metric so best lines are drawn on top
+    order = plot_df[metric_col].argsort().values
+    for idx in order:
+        y = [normed[col][idx] for col in group_cols]
+        color = cmap(norm(plot_df[metric_col].iloc[idx]))
+        ax.plot(x_positions, y, color=color, alpha=0.5, linewidth=1.2)
+
+    # Axis ticks: show actual parameter values
+    for i, col in enumerate(group_cols):
+        unique_vals = sorted(plot_df[col].unique())
+        vals_float = np.array(unique_vals, dtype=float)
+        vmin, vmax = vals_float.min(), vals_float.max()
+        if vmax > vmin:
+            tick_positions = (vals_float - vmin) / (vmax - vmin)
+        else:
+            tick_positions = np.zeros_like(vals_float)
+
+        for tp, tv in zip(tick_positions, unique_vals):
+            ax.plot([i - 0.02, i + 0.02], [tp, tp], color="black", linewidth=0.8)
+            label_str = f"{tv:.2f}" if isinstance(tv, float) and tv != int(tv) else str(int(tv))
+            ax.text(i - 0.06, tp, label_str, ha="right", va="center", fontsize=8)
+
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels([param_labels.get(c, c) for c in group_cols], fontsize=11)
+    ax.set_yticks([])
+    ax.set_xlim(-0.3, len(group_cols) - 0.7)
+    ax.set_ylim(-0.05, 1.05)
+    ax.set_title("Parallel Coordinates — Hyperparameter Configurations", fontsize=14)
+
+    sm = ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax, fraction=0.03, pad=0.04)
+    cbar.set_label("Mean Best FOM1 (avg)", fontsize=11)
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, "parallel_coordinates.png"), dpi=300, bbox_inches="tight")
+    fig.savefig(os.path.join(out_dir, "parallel_coordinates.pdf"), bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: parallel_coordinates.png/pdf")
+
+
+# ======================================================================
+# Main analysis
+# ======================================================================
 
 def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
 
@@ -70,6 +309,7 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
     # 1. Scan all run directories
     # ------------------------------------------------------------------
     runs = []
+    skipped = 0
     for dirname in sorted(os.listdir(sweep_dir)):
         run_path = os.path.join(sweep_dir, dirname)
         if not os.path.isdir(run_path):
@@ -79,7 +319,8 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
             continue
 
         top_df = load_top_molecules(run_path)
-        if top_df is None or top_df.empty:
+        if top_df is None:
+            skipped += 1
             continue
 
         gen_stats = load_generation_stats(run_path)
@@ -116,7 +357,7 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
         return
 
     runs_df = pd.DataFrame(runs)
-    print(f"Found {len(runs_df)} completed runs\n")
+    print(f"Found {len(runs_df)} completed runs (skipped {skipped} incomplete)\n")
 
     # ------------------------------------------------------------------
     # 2. Aggregate across seeds per config
@@ -131,7 +372,6 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
     agg_dict = {col: ["mean", "std", "count"] for col in metric_cols}
     configs = runs_df.groupby(group_cols).agg(agg_dict).reset_index()
 
-    # Flatten multi-level columns
     configs.columns = [
         f"{a}_{b}" if b else a
         for a, b in configs.columns
@@ -157,7 +397,6 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
     for i, (_, row) in enumerate(show.iterrows(), 1):
         std_1 = row["best_FOM1_avg_std"]
         std_10 = row["top10_mean_FOM1_avg_std"]
-        # handle NaN std (single seed completed)
         s1 = f"{std_1:.4f}" if not np.isnan(std_1) else "  n/a"
         s10 = f"{std_10:.4f}" if not np.isnan(std_10) else "  n/a"
         print(
@@ -231,7 +470,7 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
             )
 
     # ------------------------------------------------------------------
-    # 6. Save results to CSV
+    # 6. Save CSVs
     # ------------------------------------------------------------------
     out_dir = os.path.join(sweep_dir, "analysis")
     os.makedirs(out_dir, exist_ok=True)
@@ -244,10 +483,22 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
             os.path.join(out_dir, "top_molecules.csv"), index=False
         )
 
-    print(f"\nResults saved to: {out_dir}/")
+    print(f"\nCSVs saved to: {out_dir}/")
     print(f"  all_runs.csv            - per-run metrics ({len(runs_df)} runs)")
     print(f"  configs_aggregated.csv  - configs averaged over seeds ({len(configs)} configs)")
     print(f"  top_molecules.csv       - best {top_n_molecules} unique molecules")
+
+    # ------------------------------------------------------------------
+    # 7. Generate figures
+    # ------------------------------------------------------------------
+    print(f"\nGenerating figures...")
+
+    plot_pairwise_heatmaps(runs_df, group_cols, out_dir)
+    plot_marginal_boxplots(runs_df, group_cols, out_dir)
+    plot_convergence_curves(runs_df, sweep_dir, out_dir, top_n=5)
+    plot_parallel_coordinates(configs, group_cols, out_dir)
+
+    print(f"\nDone.")
 
 
 if __name__ == "__main__":
