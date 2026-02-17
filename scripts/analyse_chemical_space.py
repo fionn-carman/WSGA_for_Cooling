@@ -64,10 +64,15 @@ except ImportError:
 
 def smiles_to_fingerprint(smi, radius=2, n_bits=2048):
     """Convert SMILES to Morgan fingerprint bit vector. Returns None on failure."""
-    mol = Chem.MolFromSmiles(smi)
-    if mol is None:
+    if not isinstance(smi, str):
         return None
-    return AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits)
+    try:
+        mol = Chem.MolFromSmiles(smi)
+        if mol is None:
+            return None
+        return AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits)
+    except Exception:
+        return None
 
 
 def fps_to_numpy(fps):
@@ -99,6 +104,8 @@ FUNCTIONAL_GROUPS = {
 
 def detect_functional_groups(smi):
     """Return dict of functional group counts for a SMILES string."""
+    if not isinstance(smi, str):
+        return {}
     mol = Chem.MolFromSmiles(smi)
     if mol is None:
         return {}
