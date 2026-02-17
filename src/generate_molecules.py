@@ -1,8 +1,11 @@
 import random
 import pandas as pd
 import os
-from rdkit import Chem
+from rdkit import Chem, RDLogger
 from rdkit.Chem import AllChem, DataStructs
+
+# Suppress noisy SMILES parse warnings from n-gram generated strings
+RDLogger.DisableLog("rdApp.*")
 
 # ---------------------------
 # N-gram SMILES model

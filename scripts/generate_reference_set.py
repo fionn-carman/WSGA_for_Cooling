@@ -17,6 +17,9 @@ import random
 import argparse
 import numpy as np
 
+from rdkit import RDLogger
+RDLogger.DisableLog("rdApp.*")
+
 
 def main():
     parser = argparse.ArgumentParser(
