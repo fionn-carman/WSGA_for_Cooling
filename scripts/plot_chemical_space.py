@@ -6,12 +6,13 @@ evaluated molecules across seeds, computes a shared UMAP embedding with
 the n-gram reference population, and generates publication-quality figures.
 
 Figures produced:
-  (a) Reference population coloured by dominant functional group
+  (a) Reference population coloured by dominant functional group (standalone)
   (b) GA coverage overlay on reference
   (c) Exploration over time (generation colourmap)
   (d) FOM1 fitness landscape
-  (grid) 2x2 combined figure of (a)-(d)
-  (fg)   Functional group prevalence vs generation
+  (grid)   1x3 combined figure of (b)-(d)
+  (fg_cmp) Side-by-side FG prevalence: reference vs GA
+  (fg_gen) Functional group prevalence vs generation
 
 Requirements:
     pip install umap-learn rdkit-pypi tqdm
@@ -651,25 +652,22 @@ def plot_panel_d(coords_2d, labels, fitness, out_dir, dpi=300):
 
 
 def plot_combined_grid(coords_2d, labels, generations, fitness,
-                       ref_coords, dominant_labels, label_counts, label_to_colour,
                        out_dir, dpi=300):
-    """2x2 combined grid of panels (a)-(d)."""
-    fig, axes = plt.subplots(2, 2, figsize=(14, 13))
+    """1x3 combined grid: coverage, generations, fitness."""
+    fig, axes = plt.subplots(1, 3, figsize=(21, 7))
 
-    _draw_panel_a(axes[0, 0], ref_coords, dominant_labels, label_counts,
-                  label_to_colour, show_legend=True)
-    _draw_panel_b(axes[0, 1], coords_2d, labels)
-    _draw_panel_c(axes[1, 0], coords_2d, labels, generations)
-    _draw_panel_d(axes[1, 1], coords_2d, labels, fitness)
+    _draw_panel_b(axes[0], coords_2d, labels)
+    _draw_panel_c(axes[1], coords_2d, labels, generations)
+    _draw_panel_d(axes[2], coords_2d, labels, fitness)
 
     # Panel labels
-    for ax, label in zip(axes.flat, ["(a)", "(b)", "(c)", "(d)"]):
+    for ax, label in zip(axes, ["(a)", "(b)", "(c)"]):
         ax.text(0.02, 0.98, label, transform=ax.transAxes,
                 fontsize=16, fontweight="bold", va="top", ha="left")
 
     fig.suptitle("Chemical Space Exploration — UMAP Projection of Morgan Fingerprints",
                  fontsize=14)
-    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
     _save_fig(fig, out_dir, "chemical_space_combined", dpi)
 
 
@@ -751,6 +749,64 @@ def plot_fg_over_generations(ga_df, out_dir, n_gen_bins=8, dpi=300):
     print(f"  Saved: fg_over_generations.png/pdf")
 
 
+def plot_fg_comparison(ref_smiles_list, ga_smiles_list, out_dir, dpi=300):
+    """Side-by-side bar chart comparing FG prevalence in reference vs GA molecules."""
+    print("  Computing FG distributions...")
+
+    def _fg_fractions(smiles_list, desc):
+        """Return {fg_short_name: fraction} for a list of SMILES."""
+        total_counts = Counter()
+        n_valid = 0
+        sample = smiles_list
+        if len(sample) > 5000:
+            import random as _rng
+            _rng_inst = _rng.Random(42)
+            sample = _rng_inst.sample(smiles_list, 5000)
+        for smi in tqdm(sample, desc=desc):
+            counts = detect_functional_groups(smi)
+            if counts:
+                n_valid += 1
+                for name, c in counts.items():
+                    if c > 0:
+                        total_counts[name] += 1
+        fracs = {}
+        for name in FUNCTIONAL_GROUPS:
+            short = FG_SHORT_NAMES.get(name, name)
+            fracs[short] = total_counts[name] / n_valid if n_valid > 0 else 0
+        return fracs
+
+    ref_fracs = _fg_fractions(ref_smiles_list, "FGs (reference)")
+    ga_fracs = _fg_fractions(ga_smiles_list, "FGs (GA)")
+
+    # Sort by reference prevalence descending
+    fg_names = sorted(ref_fracs.keys(), key=lambda n: ref_fracs[n], reverse=True)
+    # Filter out groups with < 1% in both
+    fg_names = [n for n in fg_names if ref_fracs[n] > 0.01 or ga_fracs[n] > 0.01]
+
+    x = np.arange(len(fg_names))
+    bar_width = 0.35
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ref_vals = [ref_fracs[n] for n in fg_names]
+    ga_vals = [ga_fracs[n] for n in fg_names]
+
+    ax.bar(x - bar_width / 2, ref_vals, bar_width, label="N-gram reference",
+           color="#7FB3D8", edgecolor="white", linewidth=0.5)
+    ax.bar(x + bar_width / 2, ga_vals, bar_width, label="GA explored",
+           color="#E07B54", edgecolor="white", linewidth=0.5)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(fg_names, rotation=45, ha="right", fontsize=9)
+    ax.set_ylabel("Fraction of Molecules", fontsize=11)
+    ax.set_title("Functional Group Prevalence: Reference vs GA", fontsize=13)
+    ax.legend(fontsize=9, frameon=False, loc="upper right")
+    ax.set_ylim(0, min(1.05, max(max(ref_vals), max(ga_vals)) * 1.2))
+    ax.tick_params(labelsize=9)
+
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "fg_comparison", dpi)
+
+
 # ======================================================================
 # Coverage statistics
 # ======================================================================
@@ -803,18 +859,16 @@ def print_coverage_stats(coords_2d, labels, ga_df):
 
 def _generate_all_figures(coords_2d, labels, generations, fitness,
                           valid_smiles, ga_df, out_dir, dpi=300):
-    """Generate all 6 figures from pre-computed UMAP data."""
+    """Generate all figures from pre-computed UMAP data."""
     print(f"\n{'='*60}")
     print("  Generating figures")
     print("=" * 60)
 
-    # Panel (a) — also returns data needed for the combined grid
+    # Standalone panel (a): FG-coloured reference
     print("\n  --- Panel (a): Functional group reference ---")
-    ref_coords, dominant_labels, label_counts, label_to_colour = plot_panel_a(
-        coords_2d, labels, valid_smiles, out_dir, dpi=dpi,
-    )
+    plot_panel_a(coords_2d, labels, valid_smiles, out_dir, dpi=dpi)
 
-    # Panels (b), (c), (d)
+    # Standalone panels (b), (c), (d)
     print("\n  --- Panel (b): Coverage ---")
     plot_panel_b(coords_2d, labels, out_dir, dpi=dpi)
 
@@ -824,13 +878,19 @@ def _generate_all_figures(coords_2d, labels, generations, fitness,
     print("\n  --- Panel (d): Fitness landscape ---")
     plot_panel_d(coords_2d, labels, fitness, out_dir, dpi=dpi)
 
-    # Combined grid
-    print("\n  --- Combined 2x2 grid ---")
-    plot_combined_grid(
-        coords_2d, labels, generations, fitness,
-        ref_coords, dominant_labels, label_counts, label_to_colour,
-        out_dir, dpi=dpi,
-    )
+    # Combined 1x3 grid (coverage + generations + fitness)
+    print("\n  --- Combined 1x3 grid ---")
+    plot_combined_grid(coords_2d, labels, generations, fitness, out_dir, dpi=dpi)
+
+    # FG comparison: reference vs GA (requires both)
+    ref_mask = labels == "reference"
+    exp_mask = labels == "explored"
+    ref_smiles_list = [s for s, m in zip(valid_smiles, ref_mask) if m]
+    ga_smiles_list = [s for s, m in zip(valid_smiles, exp_mask) if m]
+
+    if ref_smiles_list and ga_smiles_list:
+        print("\n  --- FG comparison: reference vs GA ---")
+        plot_fg_comparison(ref_smiles_list, ga_smiles_list, out_dir, dpi=dpi)
 
     # FG over generations (requires GA dataframe)
     if ga_df is not None:
