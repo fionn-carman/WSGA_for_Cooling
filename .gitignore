@@ -16,6 +16,9 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Runtime logs
+src/logs/
+
 # PBS job logs
 *.e[0-9]*
 *.o[0-9]*
