@@ -44,12 +44,15 @@ from collections import Counter
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 try:
-    from rdkit import Chem
+    from rdkit import Chem, RDLogger
     from rdkit.Chem import AllChem, DataStructs, Descriptors
     from rdkit.Chem.Scaffolds import MurckoScaffold
 except ImportError:
     print("ERROR: RDKit is required. Install with: conda install -c conda-forge rdkit")
     sys.exit(1)
+
+# Suppress RDKit SMILES parse warnings (noisy with n-gram generated molecules)
+RDLogger.DisableLog("rdApp.*")
 
 try:
     import umap
@@ -549,11 +552,15 @@ def analyse_chemical_space(run_dir=None, sweep_dir=None, data_dir=None,
     # Compute fingerprints, filtering failures
     fps = []
     valid_indices = []
+    total = len(all_smiles)
     for i, smi in enumerate(all_smiles):
+        if i % 5000 == 0:
+            print(f"\r  Fingerprinting: {i}/{total} ({100*i/total:.0f}%)", end="", flush=True)
         fp = smiles_to_fingerprint(smi)
         if fp is not None:
             fps.append(fp)
             valid_indices.append(i)
+    print(f"\r  Fingerprinting: {total}/{total} (100%)    ")
 
     labels = np.array([all_labels[i] for i in valid_indices])
     generations = np.array([all_generations[i] for i in valid_indices], dtype=float)
@@ -675,9 +682,9 @@ if __name__ == "__main__":
                         help="Data directory for reference molecule generation")
     parser.add_argument("--n_runs", type=int, default=3,
                         help="Number of top runs to analyse from sweep")
-    parser.add_argument("--n_ref", type=int, default=10000,
+    parser.add_argument("--n_ref", type=int, default=3000,
                         help="Number of reference molecules to generate")
-    parser.add_argument("--sample_per_run", type=int, default=20000,
+    parser.add_argument("--sample_per_run", type=int, default=5000,
                         help="Max molecules to sample per run (for speed)")
     args = parser.parse_args()
 
