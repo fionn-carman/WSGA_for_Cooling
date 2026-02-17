@@ -1,7 +1,7 @@
 #!/bin/bash
 #PBS -N wsga_chem_space
 #PBS -l walltime=12:00:00
-#PBS -l select=1:ncpus=1:mem=64gb
+#PBS -l select=1:ncpus=1:mem=96gb
 #PBS -o /dev/null
 #PBS -e /dev/null
 
@@ -39,6 +39,9 @@ eval "$(~/miniforge3/bin/conda shell.bash hook)"
 conda activate rdkit_env
 cd "$DIRECTORY"
 
+# Ensure pipe failures are caught (otherwise tee masks Python exit code)
+set -o pipefail
+
 # ==============================
 # Configuration
 # ==============================
@@ -56,7 +59,7 @@ NPZ_FILE="${OUTPUT_DIR}/chemical_space_data.npz"
 # Parameters
 N_REF=5000                 # Reference molecules to generate
 MAX_CONFIGS=8              # Number of extreme configs to select
-SAMPLE_PER_SEED=0          # 0 = use all molecules (no sampling)
+SAMPLE_PER_SEED=50000      # Max molecules per seed run (keeps total manageable for UMAP)
 
 mkdir -p "$OUTPUT_DIR"
 
