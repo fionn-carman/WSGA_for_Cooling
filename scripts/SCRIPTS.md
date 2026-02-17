@@ -29,13 +29,23 @@ qsub fp_mp_sweep.sh
 ```
 
 ### `chemical_space_sweep.sh`
-Single PBS job that runs the chemical space analysis pipeline. Generates a 10k n-gram reference set (if not cached), identifies the top hyperparameter config from `configs_aggregated.csv`, loads all seeds for that config, fits a shared UMAP, and produces 6 publication-quality figures. Requires 64 GB memory.
+Single PBS job that runs the chemical space analysis pipeline. Generates a 10k n-gram reference set (if not cached), identifies the top hyperparameter config from `configs_aggregated.csv`, loads all seeds for that config, fits a shared UMAP, and produces publication-quality figures. Requires 64 GB memory.
 
 **Prerequisite:** `analyse_hyperparam_sweep.py` must have been run first.
 
 ```bash
 qsub chemical_space_sweep.sh
 bash chemical_space_sweep.sh       # local run
+```
+
+### `tau_chem_space_sweep.sh`
+Chemical space analysis for the tau sweep. Runs `analyse_tau_sweep.py`, generates the n-gram reference set (if not cached), then fits a single shared UMAP across all 8 tau values and produces a 2x4 coverage grid plus FG comparison figure. Requires 64 GB memory, ~6 hours.
+
+**Prerequisite:** `tau_sweep.sh` must have completed (all 40 jobs).
+
+```bash
+qsub tau_chem_space_sweep.sh
+bash tau_chem_space_sweep.sh       # local run
 ```
 
 ---
@@ -74,17 +84,28 @@ python generate_reference_set.py --n_mol 5000      # custom count
 ```
 
 ### `plot_chemical_space.py`
-Main chemical space visualisation script. Identifies the top config from `configs_aggregated.csv`, loads all seed runs, computes a shared UMAP embedding with the n-gram reference set, and produces 6 figures:
-- (a) Reference population coloured by dominant functional group
+Main chemical space visualisation script. Identifies the top config from `configs_aggregated.csv`, loads all seed runs, computes a shared UMAP embedding with the n-gram reference set, and produces figures:
+- (a) Reference population coloured by dominant functional group (standalone)
 - (b) GA coverage overlay on reference
 - (c) Exploration over time (generation colourmap)
 - (d) FOM1 fitness landscape
-- Combined 2x2 grid of (a)-(d)
-- Functional group prevalence vs generation line chart
+- 1x3 combined grid of (b)-(d)
+- FG prevalence comparison: reference vs GA
+- FG prevalence vs generation line chart
+
+Supports `--npz` mode for fast replotting from cached UMAP.
 
 ```bash
 python plot_chemical_space.py --sweep_dir ../outputs/hyperparam_sweep
-python plot_chemical_space.py --sweep_dir ../outputs/hyperparam_sweep --no_cache
+python plot_chemical_space.py --npz path/to/umap_cache.npz --out_dir ./figs
+```
+
+### `plot_tau_chemical_space.py`
+Tau sweep chemical space visualisation. Fits a single shared UMAP across all tau values and the n-gram reference set, then produces a 2x4 grid figure (one panel per tau) and a FG comparison bar chart. Supports `--npz` mode for replotting from cached UMAP.
+
+```bash
+python plot_tau_chemical_space.py --sweep_dir ../outputs/tau_sweep
+python plot_tau_chemical_space.py --npz path/to/tau_umap_cache.npz --out_dir ./figs
 ```
 
 ### `plot_local_fg_umap.py`
@@ -102,6 +123,10 @@ python plot_local_fg_umap.py --n_mol 10000 --out_dir ../outputs/custom
 ```
 Stage 1: hyperparam_sweep.sh  -->  analyse_hyperparam_sweep.py
 Stage 2: tau_sweep.sh         -->  analyse_tau_sweep.py
+                                   -->  tau_chem_space_sweep.sh
+                                          |-> analyse_tau_sweep.py
+                                          |-> generate_reference_set.py
+                                          |-> plot_tau_chemical_space.py (shared UMAP + 2x4 grid)
 Chem space: chemical_space_sweep.sh
               |-> generate_reference_set.py  (Step 1: 10k reference set)
               |-> plot_chemical_space.py      (Step 2: UMAP + 6 figures)
