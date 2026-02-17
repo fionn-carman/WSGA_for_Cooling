@@ -19,6 +19,7 @@ Requirements:
 Usage:
     python plot_chemical_space.py --sweep_dir ../outputs/hyperparam_sweep
     python plot_chemical_space.py --sweep_dir ../outputs/hyperparam_sweep --no_cache
+    python plot_chemical_space.py --npz path/to/umap_cache.npz --out_dir ./figs
 """
 
 import os
@@ -33,8 +34,7 @@ from collections import Counter
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.colors import Normalize
-from matplotlib.cm import ScalarMappable
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -466,7 +466,7 @@ def _draw_panel_a(ax, ref_coords, dominant_labels, label_counts, label_to_colour
         if mask.sum() > 0:
             ax.scatter(ref_coords[mask, 0], ref_coords[mask, 1],
                        c=label_to_colour["Hydrocarbon only"], s=4, alpha=0.3,
-                       label=f"Hydrocarbon only ({mask.sum()})", rasterized=True)
+                       label=f"Hydrocarbon ({mask.sum()})", rasterized=True)
 
     for lab in unique_labels:
         if lab == "Hydrocarbon only":
@@ -483,8 +483,8 @@ def _draw_panel_a(ax, ref_coords, dominant_labels, label_counts, label_to_colour
     ax.set_yticks([])
 
     if show_legend:
-        ax.legend(fontsize=7, markerscale=2.5, bbox_to_anchor=(1.02, 1),
-                  loc="upper left", title="Dominant FG")
+        ax.legend(fontsize=6, markerscale=2, frameon=False, loc="upper right",
+                  ncol=1, handletextpad=0.3, labelspacing=0.3)
 
 
 def _draw_panel_b(ax, coords_2d, labels):
@@ -501,9 +501,28 @@ def _draw_panel_b(ax, coords_2d, labels):
                c="red", s=30, alpha=0.9, marker="*", label="Top 50", zorder=5)
 
     ax.set_title("Chemical Space Coverage", fontsize=12)
-    ax.legend(fontsize=9, markerscale=2)
+    ax.legend(fontsize=8, markerscale=2, frameon=False, loc="upper right")
     ax.set_xticks([])
     ax.set_yticks([])
+
+
+def _add_inset_colorbar(ax, mappable, label, width="3%", height="40%", loc="lower right"):
+    """Add a colorbar inside the axes using an inset_axes."""
+    # loc string to bbox_to_anchor + position
+    pos_map = {
+        "lower right": (0.98, 0.02, 0, 0),
+        "upper right": (0.98, 0.98, 0, 0),
+    }
+    bx, by, _, _ = pos_map.get(loc, (0.98, 0.02, 0, 0))
+    cax = inset_axes(ax, width=width, height=height,
+                     loc="lower left",
+                     bbox_to_anchor=(bx - 0.05, by if "lower" in loc else by - 0.45, 0.05, 0.45),
+                     bbox_transform=ax.transAxes,
+                     borderpad=0)
+    cbar = plt.colorbar(mappable, cax=cax)
+    cbar.set_label(label, fontsize=8)
+    cbar.ax.tick_params(labelsize=7)
+    return cbar
 
 
 def _draw_panel_c(ax, coords_2d, labels, generations):
@@ -519,8 +538,7 @@ def _draw_panel_c(ax, coords_2d, labels, generations):
     if len(gen_vals) > 0:
         sc = ax.scatter(coords_2d[exp_mask, 0], coords_2d[exp_mask, 1],
                         c=gen_vals, cmap="plasma", s=3, alpha=0.3, rasterized=True)
-        cbar = plt.colorbar(sc, ax=ax, fraction=0.046, pad=0.04)
-        cbar.set_label("Generation", fontsize=10)
+        _add_inset_colorbar(ax, sc, "Generation")
 
     ax.scatter(coords_2d[top_mask, 0], coords_2d[top_mask, 1],
                c="red", s=30, alpha=0.9, marker="*", zorder=5)
@@ -546,8 +564,7 @@ def _draw_panel_d(ax, coords_2d, labels, fitness):
         sc = ax.scatter(coords_2d[exp_mask, 0], coords_2d[exp_mask, 1],
                         c=fit_vals, cmap="viridis", s=3, alpha=0.3,
                         vmin=vmin, vmax=vmax, rasterized=True)
-        cbar = plt.colorbar(sc, ax=ax, fraction=0.046, pad=0.04)
-        cbar.set_label("FOM1 (avg)", fontsize=10)
+        _add_inset_colorbar(ax, sc, "FOM1 (avg)")
 
     ax.scatter(coords_2d[top_mask, 0], coords_2d[top_mask, 1],
                c="red", s=30, alpha=0.9, marker="*", zorder=5)
@@ -561,8 +578,8 @@ def _draw_panel_d(ax, coords_2d, labels, fitness):
 # Standalone figure functions
 # ======================================================================
 
-def plot_panel_a(coords_2d, labels, valid_smiles, out_dir, dpi=300):
-    """Standalone panel (a): FG-coloured reference population."""
+def _prepare_panel_a_data(coords_2d, labels, valid_smiles):
+    """Compute FG labels and colour map for panel (a). Returns reusable data."""
     ref_mask = labels == "reference"
     ref_coords = coords_2d[ref_mask]
     ref_smiles_list = [s for s, m in zip(valid_smiles, ref_mask) if m]
@@ -581,64 +598,63 @@ def plot_panel_a(coords_2d, labels, valid_smiles, out_dir, dpi=300):
             label_to_colour[lab] = cmap(colour_idx / max(len(unique_labels) - 1, 1))
             colour_idx += 1
 
-    fig, ax = plt.subplots(figsize=(8, 7))
+    return ref_coords, dominant_labels, label_counts, label_to_colour
+
+
+def _save_fig(fig, out_dir, basename, dpi=300):
+    """Save figure as PNG + PDF with consistent settings."""
+    fig.savefig(os.path.join(out_dir, f"{basename}.png"),
+                dpi=dpi, bbox_inches="tight", pad_inches=0.1)
+    fig.savefig(os.path.join(out_dir, f"{basename}.pdf"),
+                bbox_inches="tight", pad_inches=0.1)
+    plt.close(fig)
+    print(f"  Saved: {basename}.png/pdf")
+
+
+PANEL_SIZE = (7, 7)  # consistent size for all standalone panels
+
+
+def plot_panel_a(coords_2d, labels, valid_smiles, out_dir, dpi=300):
+    """Standalone panel (a): FG-coloured reference population."""
+    ref_coords, dominant_labels, label_counts, label_to_colour = \
+        _prepare_panel_a_data(coords_2d, labels, valid_smiles)
+
+    fig, ax = plt.subplots(figsize=PANEL_SIZE)
     _draw_panel_a(ax, ref_coords, dominant_labels, label_counts, label_to_colour)
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "panel_a_fg_reference.png"),
-                dpi=dpi, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "panel_a_fg_reference.pdf"),
-                bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Saved: panel_a_fg_reference.png/pdf")
-
-    # Return data for combined grid
+    _save_fig(fig, out_dir, "panel_a_fg_reference", dpi)
     return ref_coords, dominant_labels, label_counts, label_to_colour
 
 
 def plot_panel_b(coords_2d, labels, out_dir, dpi=300):
     """Standalone panel (b): Coverage overlay."""
-    fig, ax = plt.subplots(figsize=(8, 7))
+    fig, ax = plt.subplots(figsize=PANEL_SIZE)
     _draw_panel_b(ax, coords_2d, labels)
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "panel_b_coverage.png"),
-                dpi=dpi, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "panel_b_coverage.pdf"),
-                bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Saved: panel_b_coverage.png/pdf")
+    _save_fig(fig, out_dir, "panel_b_coverage", dpi)
 
 
 def plot_panel_c(coords_2d, labels, generations, out_dir, dpi=300):
     """Standalone panel (c): Exploration over time."""
-    fig, ax = plt.subplots(figsize=(8, 7))
+    fig, ax = plt.subplots(figsize=PANEL_SIZE)
     _draw_panel_c(ax, coords_2d, labels, generations)
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "panel_c_generations.png"),
-                dpi=dpi, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "panel_c_generations.pdf"),
-                bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Saved: panel_c_generations.png/pdf")
+    _save_fig(fig, out_dir, "panel_c_generations", dpi)
 
 
 def plot_panel_d(coords_2d, labels, fitness, out_dir, dpi=300):
     """Standalone panel (d): Fitness landscape."""
-    fig, ax = plt.subplots(figsize=(8, 7))
+    fig, ax = plt.subplots(figsize=PANEL_SIZE)
     _draw_panel_d(ax, coords_2d, labels, fitness)
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "panel_d_fitness.png"),
-                dpi=dpi, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "panel_d_fitness.pdf"),
-                bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Saved: panel_d_fitness.png/pdf")
+    _save_fig(fig, out_dir, "panel_d_fitness", dpi)
 
 
 def plot_combined_grid(coords_2d, labels, generations, fitness,
                        ref_coords, dominant_labels, label_counts, label_to_colour,
                        out_dir, dpi=300):
     """2x2 combined grid of panels (a)-(d)."""
-    fig, axes = plt.subplots(2, 2, figsize=(16, 14))
+    fig, axes = plt.subplots(2, 2, figsize=(14, 13))
 
     _draw_panel_a(axes[0, 0], ref_coords, dominant_labels, label_counts,
                   label_to_colour, show_legend=True)
@@ -648,18 +664,13 @@ def plot_combined_grid(coords_2d, labels, generations, fitness,
 
     # Panel labels
     for ax, label in zip(axes.flat, ["(a)", "(b)", "(c)", "(d)"]):
-        ax.text(-0.05, 1.05, label, transform=ax.transAxes,
-                fontsize=16, fontweight="bold", va="top")
+        ax.text(0.02, 0.98, label, transform=ax.transAxes,
+                fontsize=16, fontweight="bold", va="top", ha="left")
 
     fig.suptitle("Chemical Space Exploration — UMAP Projection of Morgan Fingerprints",
-                 fontsize=15, y=1.02)
-    fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "chemical_space_combined.png"),
-                dpi=dpi, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "chemical_space_combined.pdf"),
-                bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Saved: chemical_space_combined.png/pdf")
+                 fontsize=14)
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    _save_fig(fig, out_dir, "chemical_space_combined", dpi)
 
 
 def plot_fg_over_generations(ga_df, out_dir, n_gen_bins=8, dpi=300):
@@ -726,7 +737,8 @@ def plot_fg_over_generations(ga_df, out_dir, n_gen_bins=8, dpi=300):
     ax.set_xlabel("Generation Range", fontsize=12)
     ax.set_ylabel("Fraction of Molecules Containing Group", fontsize=12)
     ax.set_title("Functional Group Prevalence Across Generations", fontsize=14)
-    ax.legend(fontsize=8, bbox_to_anchor=(1.02, 1), loc="upper left")
+    ax.legend(fontsize=7, frameon=False, loc="upper right", ncol=1,
+              handletextpad=0.3, labelspacing=0.3)
     ax.set_ylim(0, 1.05)
     ax.tick_params(labelsize=10)
 
@@ -786,6 +798,49 @@ def print_coverage_stats(coords_2d, labels, ga_df):
 
 
 # ======================================================================
+# Figure generation orchestrator
+# ======================================================================
+
+def _generate_all_figures(coords_2d, labels, generations, fitness,
+                          valid_smiles, ga_df, out_dir, dpi=300):
+    """Generate all 6 figures from pre-computed UMAP data."""
+    print(f"\n{'='*60}")
+    print("  Generating figures")
+    print("=" * 60)
+
+    # Panel (a) — also returns data needed for the combined grid
+    print("\n  --- Panel (a): Functional group reference ---")
+    ref_coords, dominant_labels, label_counts, label_to_colour = plot_panel_a(
+        coords_2d, labels, valid_smiles, out_dir, dpi=dpi,
+    )
+
+    # Panels (b), (c), (d)
+    print("\n  --- Panel (b): Coverage ---")
+    plot_panel_b(coords_2d, labels, out_dir, dpi=dpi)
+
+    print("\n  --- Panel (c): Generations ---")
+    plot_panel_c(coords_2d, labels, generations, out_dir, dpi=dpi)
+
+    print("\n  --- Panel (d): Fitness landscape ---")
+    plot_panel_d(coords_2d, labels, fitness, out_dir, dpi=dpi)
+
+    # Combined grid
+    print("\n  --- Combined 2x2 grid ---")
+    plot_combined_grid(
+        coords_2d, labels, generations, fitness,
+        ref_coords, dominant_labels, label_counts, label_to_colour,
+        out_dir, dpi=dpi,
+    )
+
+    # FG over generations (requires GA dataframe)
+    if ga_df is not None:
+        print("\n  --- FG over generations ---")
+        plot_fg_over_generations(ga_df, out_dir, dpi=dpi)
+    else:
+        print("\n  Skipping FG-over-generations (no GA dataframe available)")
+
+
+# ======================================================================
 # Main
 # ======================================================================
 
@@ -793,8 +848,10 @@ def main():
     parser = argparse.ArgumentParser(
         description="Chemical space analysis for the top hyperparameter configuration"
     )
-    parser.add_argument("--sweep_dir", type=str, required=True,
+    parser.add_argument("--sweep_dir", type=str, default=None,
                         help="Sweep directory (e.g. ../outputs/hyperparam_sweep)")
+    parser.add_argument("--npz", type=str, default=None,
+                        help="Path to existing .npz UMAP cache — skip steps 1-4, replot only")
     parser.add_argument("--data_dir", type=str, default=None,
                         help="Data directory (auto-detected)")
     parser.add_argument("--ref_csv", type=str, default=None,
@@ -809,6 +866,8 @@ def main():
                         help="Path to .npz UMAP cache (default: {out_dir}/umap_cache.npz)")
     parser.add_argument("--no_cache", action="store_true",
                         help="Force recomputation of UMAP even if cache exists")
+    parser.add_argument("--ga_csv", type=str, default=None,
+                        help="Path to GA molecules CSV (for --npz mode FG-over-gen plot)")
     parser.add_argument("--dpi", type=int, default=300,
                         help="DPI for PNG output (default: 300)")
     args = parser.parse_args()
@@ -824,12 +883,67 @@ def main():
         args.ref_csv = os.path.join(repo_root, "data", "ngram_reference_10k.csv")
 
     if args.out_dir is None:
-        args.out_dir = os.path.join(args.sweep_dir, "analysis", "chemical_space")
+        if args.sweep_dir is not None:
+            args.out_dir = os.path.join(args.sweep_dir, "analysis", "chemical_space")
+        elif args.npz is not None:
+            args.out_dir = os.path.dirname(os.path.abspath(args.npz))
+        else:
+            args.out_dir = "."
 
     if args.cache is None:
         args.cache = os.path.join(args.out_dir, "umap_cache.npz")
 
     os.makedirs(args.out_dir, exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # Mode A: --npz supplied → load cache and replot only
+    # ------------------------------------------------------------------
+    if args.npz is not None:
+        if not os.path.exists(args.npz):
+            print(f"ERROR: {args.npz} not found.")
+            sys.exit(1)
+
+        print("=" * 60)
+        print("  NPZ MODE: Loading cached UMAP and replotting")
+        print("=" * 60)
+
+        data = np.load(args.npz, allow_pickle=True)
+        coords_2d = data["coords_2d"]
+        labels = data["labels"]
+        generations = data["generations"]
+        fitness = data["fitness"]
+        valid_smiles = data["smiles"].tolist()
+
+        print(f"  Loaded {len(labels)} points from {args.npz}")
+        print(f"    Reference: {(labels == 'reference').sum()}")
+        print(f"    Explored:  {(labels == 'explored').sum()}")
+        print(f"    Top:       {(labels == 'top').sum()}")
+
+        # Load GA dataframe if available (for FG-over-generations)
+        ga_df = None
+        if args.ga_csv is not None and os.path.exists(args.ga_csv):
+            ga_df = pd.read_csv(args.ga_csv)
+            if "CanonicalSMILES" in ga_df.columns and "SMILES" not in ga_df.columns:
+                ga_df.rename(columns={"CanonicalSMILES": "SMILES"}, inplace=True)
+            print(f"  Loaded {len(ga_df)} GA molecules from {args.ga_csv}")
+        elif args.sweep_dir is not None:
+            # Try to load from sweep dir
+            params, label, mean_fom = identify_top_config(args.sweep_dir)
+            seed_dirs = find_seed_dirs(args.sweep_dir, params)
+            if seed_dirs:
+                ga_df = load_ga_molecules(seed_dirs, sample_ga=args.sample_ga)
+                print(f"  Loaded {len(ga_df)} GA molecules from sweep dir")
+
+        _generate_all_figures(coords_2d, labels, generations, fitness,
+                              valid_smiles, ga_df, args.out_dir, args.dpi)
+        return
+
+    # ------------------------------------------------------------------
+    # Mode B: Full pipeline (--sweep_dir required)
+    # ------------------------------------------------------------------
+    if args.sweep_dir is None:
+        print("ERROR: Either --sweep_dir or --npz is required.")
+        sys.exit(1)
 
     # ==================================================================
     # 1. Identify top config
@@ -880,43 +994,11 @@ def main():
     )
 
     # ==================================================================
-    # 5. Generate figures
+    # 5-6. Generate figures + statistics
     # ==================================================================
-    print(f"\n{'='*60}")
-    print("  STEP 5: Generate figures")
-    print("=" * 60)
+    _generate_all_figures(coords_2d, labels, generations, fitness,
+                          valid_smiles, ga_df, args.out_dir, args.dpi)
 
-    # Panel (a) — also returns data needed for the combined grid
-    print("\n  --- Panel (a): Functional group reference ---")
-    ref_coords, dominant_labels, label_counts, label_to_colour = plot_panel_a(
-        coords_2d, labels, valid_smiles, args.out_dir, dpi=args.dpi,
-    )
-
-    # Panels (b), (c), (d)
-    print("\n  --- Panel (b): Coverage ---")
-    plot_panel_b(coords_2d, labels, args.out_dir, dpi=args.dpi)
-
-    print("\n  --- Panel (c): Generations ---")
-    plot_panel_c(coords_2d, labels, generations, args.out_dir, dpi=args.dpi)
-
-    print("\n  --- Panel (d): Fitness landscape ---")
-    plot_panel_d(coords_2d, labels, fitness, args.out_dir, dpi=args.dpi)
-
-    # Combined grid
-    print("\n  --- Combined 2x2 grid ---")
-    plot_combined_grid(
-        coords_2d, labels, generations, fitness,
-        ref_coords, dominant_labels, label_counts, label_to_colour,
-        args.out_dir, dpi=args.dpi,
-    )
-
-    # FG over generations
-    print("\n  --- FG over generations ---")
-    plot_fg_over_generations(ga_df, args.out_dir, dpi=args.dpi)
-
-    # ==================================================================
-    # 6. Coverage statistics
-    # ==================================================================
     print_coverage_stats(coords_2d, labels, ga_df)
 
     print(f"\nAll figures saved to: {args.out_dir}/")
