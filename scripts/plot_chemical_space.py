@@ -353,18 +353,20 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
     """Compute shared UMAP or load from cache.
 
     Returns:
-        coords_2d, labels, generations, fitness, valid_smiles, dominant_fgs
+        coords_2d, labels, generations, fitness, is_valid, valid_smiles, dominant_fgs
     """
     # Check cache
     if not no_cache and os.path.exists(cache_path):
         print(f"  Loading cached UMAP from {cache_path}...")
         data = np.load(cache_path, allow_pickle=True)
         dominant_fgs = data["dominant_fgs"] if "dominant_fgs" in data else None
+        is_valid = data["is_valid"] if "is_valid" in data else None
         return (
             data["coords_2d"],
             data["labels"],
             data["generations"],
             data["fitness"],
+            is_valid,
             data["smiles"].tolist(),
             dominant_fgs,
         )
@@ -382,13 +384,16 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
     all_labels = []
     all_generations = []
     all_fitness = []
+    all_is_valid = []
 
     for smi in ref_smiles:
         all_smiles.append(smi)
         all_labels.append("reference")
         all_generations.append(-1)
         all_fitness.append(0)
+        all_is_valid.append(-1)  # not applicable for reference
 
+    has_valid_col = "is_valid" in ga_df.columns
     for _, row in ga_df.iterrows():
         smi = row.get(smiles_col)
         if not isinstance(smi, str):
@@ -397,6 +402,7 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
         all_labels.append("explored")
         all_generations.append(row.get("generation", 0))
         all_fitness.append(row.get(fom_col, 0))
+        all_is_valid.append(int(row["is_valid"]) if has_valid_col else -1)
 
     # Top molecules as separate layer for z-order
     for smi in top_smiles_set:
@@ -404,6 +410,7 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
         all_labels.append("top")
         all_generations.append(-1)
         all_fitness.append(0)
+        all_is_valid.append(-1)
 
     # Compute fingerprints
     print(f"  Computing fingerprints for {len(all_smiles)} molecules...")
@@ -418,6 +425,7 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
     labels = np.array([all_labels[i] for i in valid_indices])
     generations = np.array([all_generations[i] for i in valid_indices], dtype=float)
     fitness = np.array([all_fitness[i] for i in valid_indices], dtype=float)
+    is_valid = np.array([all_is_valid[i] for i in valid_indices], dtype=np.int8)
     valid_smiles = [all_smiles[i] for i in valid_indices]
 
     print(f"  Valid fingerprints: {len(fps)} / {len(all_smiles)}")
@@ -451,12 +459,13 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
         labels=labels,
         generations=generations,
         fitness=fitness,
+        is_valid=is_valid,
         smiles=np.array(valid_smiles, dtype=object),
         dominant_fgs=dominant_fgs,
     )
     print(f"  Cached UMAP to {cache_path}")
 
-    return coords_2d, labels, generations, fitness, valid_smiles, dominant_fgs
+    return coords_2d, labels, generations, fitness, is_valid, valid_smiles, dominant_fgs
 
 
 # ======================================================================
@@ -464,8 +473,15 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
 # ======================================================================
 
 def _draw_panel_a(ax, ref_coords, dominant_labels, label_counts, label_to_colour,
-                  show_legend=True):
-    """Panel (a): Reference population coloured by dominant FG."""
+                  show_legend=True, all_coords=None):
+    """Panel (a): FG-coloured population scatter.
+
+    Parameters
+    ----------
+    all_coords : array, optional
+        Full UMAP coordinates (all populations) for consistent axis limits.
+        Falls back to ref_coords if not provided.
+    """
     unique_labels = [lab for lab, _ in label_counts.most_common()]
 
     # Hydrocarbons first (background)
@@ -486,8 +502,7 @@ def _draw_panel_a(ax, ref_coords, dominant_labels, label_counts, label_to_colour
                    c=[label_to_colour[lab]], s=8, alpha=0.5,
                    label=f"{lab} ({mask.sum()})", rasterized=True)
 
-    ax.set_title("Reference Population — Functional Groups", fontsize=12)
-    _apply_axis_limits(ax, ref_coords)
+    _apply_axis_limits(ax, all_coords if all_coords is not None else ref_coords)
     ax.set_xticks([])
     ax.set_yticks([])
 
@@ -667,7 +682,9 @@ def plot_panel_a(coords_2d, labels, valid_smiles, out_dir, dominant_fgs=None,
         _prepare_panel_a_data(coords_2d, labels, valid_smiles, dominant_fgs)
 
     fig, ax = plt.subplots(figsize=PANEL_SIZE)
-    _draw_panel_a(ax, ref_coords, dominant_labels, label_counts, label_to_colour)
+    _draw_panel_a(ax, ref_coords, dominant_labels, label_counts, label_to_colour,
+                  all_coords=coords_2d)
+    ax.set_title("Reference Population — Functional Groups", fontsize=12)
     fig.tight_layout()
     _save_fig(fig, out_dir, "panel_a_fg_reference", dpi)
     return ref_coords, dominant_labels, label_counts, label_to_colour
@@ -693,10 +710,98 @@ def plot_fg_ga(coords_2d, labels, valid_smiles, label_to_colour, out_dir,
             label_to_colour[lab] = "#999999"
 
     fig, ax = plt.subplots(figsize=PANEL_SIZE)
-    _draw_panel_a(ax, ga_coords, dominant_labels, label_counts, label_to_colour)
+    _draw_panel_a(ax, ga_coords, dominant_labels, label_counts, label_to_colour,
+                  all_coords=coords_2d)
     ax.set_title("GA Explored — Functional Groups", fontsize=12)
     fig.tight_layout()
     _save_fig(fig, out_dir, "fg_ga_explored", dpi)
+
+
+def plot_fg_combined(coords_2d, labels, valid_smiles, out_dir,
+                     dominant_fgs=None, dpi=300):
+    """1x2 combined grid: reference FG + GA FG."""
+    ref_coords, dominant_labels_ref, label_counts_ref, label_to_colour = \
+        _prepare_panel_a_data(coords_2d, labels, valid_smiles, dominant_fgs)
+
+    exp_mask = labels == "explored"
+    ga_coords = coords_2d[exp_mask]
+    if dominant_fgs is not None:
+        dominant_labels_ga = dominant_fgs[exp_mask]
+    else:
+        ga_smiles_list = [s for s, m in zip(valid_smiles, exp_mask) if m]
+        dominant_labels_ga, _ = assign_dominant_fg(ga_smiles_list)
+    label_counts_ga = Counter(dominant_labels_ga)
+    for lab in label_counts_ga:
+        if lab not in label_to_colour:
+            label_to_colour[lab] = "#999999"
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+
+    _draw_panel_a(axes[0], ref_coords, dominant_labels_ref, label_counts_ref,
+                  label_to_colour, all_coords=coords_2d)
+    axes[0].set_title("Reference Population — Functional Groups", fontsize=12)
+
+    _draw_panel_a(axes[1], ga_coords, dominant_labels_ga, label_counts_ga,
+                  label_to_colour, all_coords=coords_2d)
+    axes[1].set_title("GA Explored — Functional Groups", fontsize=12)
+
+    for ax, lab in zip(axes, ["(a)", "(b)"]):
+        ax.text(0.02, 0.98, lab, transform=ax.transAxes,
+                fontsize=16, fontweight="bold", va="top", ha="left")
+
+    fig.suptitle("Functional Group Distribution — UMAP Projection", fontsize=14)
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    _save_fig(fig, out_dir, "fg_combined", dpi)
+    return label_to_colour
+
+
+def _draw_panel_validity(ax, coords_2d, labels, is_valid):
+    """Panel: GA molecules coloured by validity (valid=green, invalid=red)."""
+    ref_mask = labels == "reference"
+    exp_mask = labels == "explored"
+    top_mask = labels == "top"
+
+    ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
+               c="#EEEEEE", s=2, alpha=0.2, rasterized=True)
+
+    if is_valid is not None:
+        exp_valid = is_valid[exp_mask]
+        valid_mask_exp = exp_valid == 1
+        invalid_mask_exp = exp_valid == 0
+
+        exp_coords = coords_2d[exp_mask]
+        # Invalid first (background)
+        if invalid_mask_exp.sum() > 0:
+            ax.scatter(exp_coords[invalid_mask_exp, 0], exp_coords[invalid_mask_exp, 1],
+                       c="#D64545", s=3, alpha=0.2,
+                       label=f"Invalid ({invalid_mask_exp.sum()})", rasterized=True)
+        # Valid on top
+        if valid_mask_exp.sum() > 0:
+            ax.scatter(exp_coords[valid_mask_exp, 0], exp_coords[valid_mask_exp, 1],
+                       c="#2CA02C", s=3, alpha=0.2,
+                       label=f"Valid ({valid_mask_exp.sum()})", rasterized=True)
+    else:
+        # No validity data — plot all explored as grey
+        ax.scatter(coords_2d[exp_mask, 0], coords_2d[exp_mask, 1],
+                   c="#999999", s=3, alpha=0.15,
+                   label="Explored (no validity data)", rasterized=True)
+
+    ax.scatter(coords_2d[top_mask, 0], coords_2d[top_mask, 1],
+               c="red", s=30, alpha=0.9, marker="*", label="Top 50", zorder=5)
+
+    ax.set_title("Molecule Validity", fontsize=12)
+    ax.legend(fontsize=8, markerscale=2, frameon=False, loc="upper right")
+    _apply_axis_limits(ax, coords_2d)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
+def plot_panel_validity(coords_2d, labels, is_valid, out_dir, dpi=300):
+    """Standalone validity UMAP."""
+    fig, ax = plt.subplots(figsize=PANEL_SIZE)
+    _draw_panel_validity(ax, coords_2d, labels, is_valid)
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "panel_validity", dpi)
 
 
 def plot_panel_b(coords_2d, labels, out_dir, dpi=300):
@@ -723,24 +828,26 @@ def plot_panel_d(coords_2d, labels, fitness, out_dir, dpi=300):
     _save_fig(fig, out_dir, "panel_d_fitness", dpi)
 
 
-def plot_combined_grid(coords_2d, labels, generations, fitness,
+def plot_combined_grid(coords_2d, labels, generations, fitness, is_valid,
                        out_dir, dpi=300):
-    """1x3 combined grid: coverage, generations, fitness."""
-    fig, axes = plt.subplots(1, 3, figsize=(21, 7))
+    """2x2 combined grid: coverage, validity, generations, fitness."""
+    fig, axes = plt.subplots(2, 2, figsize=(14, 14))
 
-    _draw_panel_b(axes[0], coords_2d, labels)
-    _add_invisible_colorbar(fig, axes[0])   # spacer so width matches (b)/(c)
-    _draw_panel_c(axes[1], coords_2d, labels, generations, fig=fig)
-    _draw_panel_d(axes[2], coords_2d, labels, fitness, fig=fig)
+    _draw_panel_b(axes[0, 0], coords_2d, labels)
+    _add_invisible_colorbar(fig, axes[0, 0])   # spacer so width matches
+    _draw_panel_validity(axes[0, 1], coords_2d, labels, is_valid)
+    _add_invisible_colorbar(fig, axes[0, 1])   # spacer so width matches
+    _draw_panel_c(axes[1, 0], coords_2d, labels, generations, fig=fig)
+    _draw_panel_d(axes[1, 1], coords_2d, labels, fitness, fig=fig)
 
     # Panel labels
-    for ax, label in zip(axes, ["(a)", "(b)", "(c)"]):
+    for ax, label in zip(axes.flat, ["(a)", "(b)", "(c)", "(d)"]):
         ax.text(0.02, 0.98, label, transform=ax.transAxes,
                 fontsize=16, fontweight="bold", va="top", ha="left")
 
     fig.suptitle("Chemical Space Exploration — UMAP Projection of Morgan Fingerprints",
                  fontsize=14)
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
     _save_fig(fig, out_dir, "chemical_space_combined", dpi)
 
 
@@ -925,7 +1032,7 @@ def print_coverage_stats(coords_2d, labels, ga_df):
 # Figure generation orchestrator
 # ======================================================================
 
-def _generate_all_figures(coords_2d, labels, generations, fitness,
+def _generate_all_figures(coords_2d, labels, generations, fitness, is_valid,
                           valid_smiles, ga_df, out_dir, dominant_fgs=None,
                           dpi=300):
     """Generate all figures from pre-computed UMAP data."""
@@ -933,32 +1040,36 @@ def _generate_all_figures(coords_2d, labels, generations, fitness,
     print("  Generating figures")
     print("=" * 60)
 
-    # Standalone panel (a): FG-coloured reference
-    print("\n  --- Panel (a): Functional group reference ---")
-    _, _, _, label_to_colour = plot_panel_a(coords_2d, labels, valid_smiles,
-                                            out_dir, dominant_fgs=dominant_fgs,
-                                            dpi=dpi)
-
-    # FG-coloured GA explored (same colour map as reference)
+    # Standalone FG panels + combined FG grid
+    print("\n  --- FG reference + GA + combined ---")
+    plot_panel_a(coords_2d, labels, valid_smiles, out_dir,
+                 dominant_fgs=dominant_fgs, dpi=dpi)
     exp_mask = labels == "explored"
     if exp_mask.sum() > 0:
-        print("\n  --- FG GA explored ---")
+        _, _, _, label_to_colour = _prepare_panel_a_data(
+            coords_2d, labels, valid_smiles, dominant_fgs)
         plot_fg_ga(coords_2d, labels, valid_smiles, label_to_colour, out_dir,
                    dominant_fgs=dominant_fgs, dpi=dpi)
+        plot_fg_combined(coords_2d, labels, valid_smiles, out_dir,
+                         dominant_fgs=dominant_fgs, dpi=dpi)
 
-    # Standalone panels (b), (c), (d)
-    print("\n  --- Panel (b): Coverage ---")
+    # Standalone panels
+    print("\n  --- Coverage ---")
     plot_panel_b(coords_2d, labels, out_dir, dpi=dpi)
 
-    print("\n  --- Panel (c): Generations ---")
+    print("\n  --- Validity ---")
+    plot_panel_validity(coords_2d, labels, is_valid, out_dir, dpi=dpi)
+
+    print("\n  --- Generations ---")
     plot_panel_c(coords_2d, labels, generations, out_dir, dpi=dpi)
 
-    print("\n  --- Panel (d): Fitness landscape ---")
+    print("\n  --- Fitness landscape ---")
     plot_panel_d(coords_2d, labels, fitness, out_dir, dpi=dpi)
 
-    # Combined 1x3 grid (coverage + generations + fitness)
-    print("\n  --- Combined 1x3 grid ---")
-    plot_combined_grid(coords_2d, labels, generations, fitness, out_dir, dpi=dpi)
+    # Combined 2x2 grid (coverage + validity + generations + fitness)
+    print("\n  --- Combined 2x2 grid ---")
+    plot_combined_grid(coords_2d, labels, generations, fitness, is_valid,
+                       out_dir, dpi=dpi)
 
     # FG over generations (requires GA dataframe)
     if ga_df is not None:
@@ -1040,6 +1151,7 @@ def main():
         labels = data["labels"]
         generations = data["generations"]
         fitness = data["fitness"]
+        is_valid = data["is_valid"] if "is_valid" in data else None
         valid_smiles = data["smiles"].tolist()
         dominant_fgs = data["dominant_fgs"] if "dominant_fgs" in data else None
 
@@ -1051,6 +1163,13 @@ def main():
             print(f"    FG labels:  cached ({len(dominant_fgs)})")
         else:
             print(f"    FG labels:  not cached (will recompute via SMARTS)")
+        if is_valid is not None:
+            exp_mask = labels == "explored"
+            exp_valid = is_valid[exp_mask]
+            print(f"    Validity:   cached (valid={int((exp_valid==1).sum())}, "
+                  f"invalid={int((exp_valid==0).sum())})")
+        else:
+            print(f"    Validity:   not cached (rerun with --no_cache to add)")
 
         # Load GA dataframe if available (for FG-over-generations)
         ga_df = None
@@ -1072,7 +1191,7 @@ def main():
                       "(configs_aggregated.csv missing?). Skipping FG-over-generations.")
                 ga_df = None
 
-        _generate_all_figures(coords_2d, labels, generations, fitness,
+        _generate_all_figures(coords_2d, labels, generations, fitness, is_valid,
                               valid_smiles, ga_df, args.out_dir,
                               dominant_fgs=dominant_fgs, dpi=args.dpi)
         return
@@ -1128,7 +1247,7 @@ def main():
     print("  STEP 4: Compute UMAP embedding")
     print("=" * 60)
 
-    coords_2d, labels, generations, fitness, valid_smiles, dominant_fgs = \
+    coords_2d, labels, generations, fitness, is_valid, valid_smiles, dominant_fgs = \
         compute_or_load_umap(
             ref_smiles, ga_df, args.cache, no_cache=args.no_cache, n_top=args.n_top,
         )
@@ -1136,7 +1255,7 @@ def main():
     # ==================================================================
     # 5-6. Generate figures + statistics
     # ==================================================================
-    _generate_all_figures(coords_2d, labels, generations, fitness,
+    _generate_all_figures(coords_2d, labels, generations, fitness, is_valid,
                           valid_smiles, ga_df, args.out_dir,
                           dominant_fgs=dominant_fgs, dpi=args.dpi)
 
