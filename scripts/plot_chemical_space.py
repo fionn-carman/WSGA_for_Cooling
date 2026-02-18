@@ -507,7 +507,7 @@ def _draw_panel_a(ax, ref_coords, dominant_labels, label_counts, label_to_colour
     ax.set_yticks([])
 
     if show_legend:
-        ax.legend(fontsize=6, markerscale=2, frameon=False, loc="upper right",
+        ax.legend(fontsize=9, markerscale=2, frameon=False, loc="upper right",
                   ncol=1, handletextpad=0.3, labelspacing=0.3)
 
 
@@ -524,8 +524,7 @@ def _draw_panel_b(ax, coords_2d, labels):
     ax.scatter(coords_2d[top_mask, 0], coords_2d[top_mask, 1],
                c="red", s=30, alpha=0.9, marker="*", label="Top 50", zorder=5)
 
-    ax.set_title("Chemical Space Coverage", fontsize=12)
-    ax.legend(fontsize=8, markerscale=2, frameon=False, loc="upper right")
+    ax.legend(fontsize=10, markerscale=2, frameon=False, loc="upper right")
     _apply_axis_limits(ax, coords_2d)
     ax.set_xticks([])
     ax.set_yticks([])
@@ -561,8 +560,8 @@ def _add_side_colorbar(fig, ax, mappable, label):
     """Add a vertical colorbar to the right of the axes."""
     cbar = fig.colorbar(mappable, ax=ax, fraction=_CBAR_FRACTION,
                         pad=_CBAR_PAD, shrink=_CBAR_SHRINK)
-    cbar.set_label(label, fontsize=10)
-    cbar.ax.tick_params(labelsize=9)
+    cbar.set_label(label, fontsize=11)
+    cbar.ax.tick_params(labelsize=10)
     return cbar
 
 
@@ -594,7 +593,6 @@ def _draw_panel_c(ax, coords_2d, labels, generations, fig=None):
     ax.scatter(coords_2d[top_mask, 0], coords_2d[top_mask, 1],
                c="red", s=30, alpha=0.9, marker="*", zorder=5)
 
-    ax.set_title("Exploration Over Time", fontsize=12)
     _apply_axis_limits(ax, coords_2d)
     ax.set_xticks([])
     ax.set_yticks([])
@@ -622,7 +620,6 @@ def _draw_panel_d(ax, coords_2d, labels, fitness, fig=None):
     ax.scatter(coords_2d[top_mask, 0], coords_2d[top_mask, 1],
                c="red", s=30, alpha=0.9, marker="*", zorder=5)
 
-    ax.set_title("Fitness Landscape", fontsize=12)
     _apply_axis_limits(ax, coords_2d)
     ax.set_xticks([])
     ax.set_yticks([])
@@ -684,7 +681,6 @@ def plot_panel_a(coords_2d, labels, valid_smiles, out_dir, dominant_fgs=None,
     fig, ax = plt.subplots(figsize=PANEL_SIZE)
     _draw_panel_a(ax, ref_coords, dominant_labels, label_counts, label_to_colour,
                   all_coords=coords_2d)
-    ax.set_title("Reference Population — Functional Groups", fontsize=12)
     fig.tight_layout()
     _save_fig(fig, out_dir, "panel_a_fg_reference", dpi)
     return ref_coords, dominant_labels, label_counts, label_to_colour
@@ -712,7 +708,6 @@ def plot_fg_ga(coords_2d, labels, valid_smiles, label_to_colour, out_dir,
     fig, ax = plt.subplots(figsize=PANEL_SIZE)
     _draw_panel_a(ax, ga_coords, dominant_labels, label_counts, label_to_colour,
                   all_coords=coords_2d)
-    ax.set_title("GA Explored — Functional Groups", fontsize=12)
     fig.tight_layout()
     _save_fig(fig, out_dir, "fg_ga_explored", dpi)
 
@@ -739,18 +734,15 @@ def plot_fg_combined(coords_2d, labels, valid_smiles, out_dir,
 
     _draw_panel_a(axes[0], ref_coords, dominant_labels_ref, label_counts_ref,
                   label_to_colour, all_coords=coords_2d)
-    axes[0].set_title("Reference Population — Functional Groups", fontsize=12)
 
     _draw_panel_a(axes[1], ga_coords, dominant_labels_ga, label_counts_ga,
                   label_to_colour, all_coords=coords_2d)
-    axes[1].set_title("GA Explored — Functional Groups", fontsize=12)
 
     for ax, lab in zip(axes, ["(a)", "(b)"]):
         ax.text(0.02, 0.98, lab, transform=ax.transAxes,
                 fontsize=16, fontweight="bold", va="top", ha="left")
 
-    fig.suptitle("Functional Group Distribution — UMAP Projection", fontsize=14)
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.tight_layout()
     _save_fig(fig, out_dir, "fg_combined", dpi)
     return label_to_colour
 
@@ -789,8 +781,7 @@ def _draw_panel_validity(ax, coords_2d, labels, is_valid):
     ax.scatter(coords_2d[top_mask, 0], coords_2d[top_mask, 1],
                c="red", s=30, alpha=0.9, marker="*", label="Top 50", zorder=5)
 
-    ax.set_title("Molecule Validity", fontsize=12)
-    ax.legend(fontsize=8, markerscale=2, frameon=False, loc="upper right")
+    ax.legend(fontsize=10, markerscale=2, frameon=False, loc="upper right")
     _apply_axis_limits(ax, coords_2d)
     ax.set_xticks([])
     ax.set_yticks([])
@@ -845,9 +836,7 @@ def plot_combined_grid(coords_2d, labels, generations, fitness, is_valid,
         ax.text(0.02, 0.98, label, transform=ax.transAxes,
                 fontsize=16, fontweight="bold", va="top", ha="left")
 
-    fig.suptitle("Chemical Space Exploration — UMAP Projection of Morgan Fingerprints",
-                 fontsize=14)
-    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    fig.tight_layout()
     _save_fig(fig, out_dir, "chemical_space_combined", dpi)
 
 
