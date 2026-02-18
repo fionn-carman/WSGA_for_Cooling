@@ -507,7 +507,7 @@ def _draw_panel_a(ax, ref_coords, dominant_labels, label_counts, label_to_colour
     ax.set_yticks([])
 
     if show_legend:
-        ax.legend(fontsize=9, markerscale=2, frameon=False, loc="upper right",
+        ax.legend(fontsize=11, markerscale=2, frameon=False, loc="upper right",
                   ncol=1, handletextpad=0.3, labelspacing=0.3)
 
 
@@ -524,7 +524,7 @@ def _draw_panel_b(ax, coords_2d, labels):
     ax.scatter(coords_2d[top_mask, 0], coords_2d[top_mask, 1],
                c="red", s=30, alpha=0.9, marker="*", label="Top 50", zorder=5)
 
-    ax.legend(fontsize=10, markerscale=2, frameon=False, loc="upper right")
+    ax.legend(fontsize=12, markerscale=2, frameon=False, loc="upper right")
     _apply_axis_limits(ax, coords_2d)
     ax.set_xticks([])
     ax.set_yticks([])
@@ -785,7 +785,7 @@ def _draw_panel_validity(ax, coords_2d, labels, is_valid):
     ax.scatter(coords_2d[top_mask, 0], coords_2d[top_mask, 1],
                c="red", s=30, alpha=0.9, marker="*", label="Top 50", zorder=5)
 
-    ax.legend(fontsize=10, markerscale=2, frameon=False, loc="upper right")
+    ax.legend(fontsize=12, markerscale=2, frameon=False, loc="upper right")
     _apply_axis_limits(ax, coords_2d)
     ax.set_xticks([])
     ax.set_yticks([])
