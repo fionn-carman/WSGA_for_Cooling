@@ -6,12 +6,12 @@ evaluated molecules across seeds, computes a shared UMAP embedding with
 the n-gram reference population, and generates publication-quality figures.
 
 Figures produced:
-  (a) Reference population coloured by dominant functional group (standalone)
-  (b) GA coverage overlay on reference
-  (c) Exploration over time (generation colourmap)
-  (d) FOM1 fitness landscape
+  (a)      Reference population coloured by dominant functional group
+  (fg_ga)  GA explored population coloured by dominant functional group
+  (b)      GA coverage overlay on reference
+  (c)      Exploration over time (generation colourmap)
+  (d)      FOM1 fitness landscape
   (grid)   1x3 combined figure of (b)-(d)
-  (fg_cmp) Side-by-side FG prevalence: reference vs GA
   (fg_gen) Functional group prevalence vs generation
 
 Requirements:
@@ -579,16 +579,9 @@ def _draw_panel_d(ax, coords_2d, labels, fitness):
 # Standalone figure functions
 # ======================================================================
 
-def _prepare_panel_a_data(coords_2d, labels, valid_smiles):
-    """Compute FG labels and colour map for panel (a). Returns reusable data."""
-    ref_mask = labels == "reference"
-    ref_coords = coords_2d[ref_mask]
-    ref_smiles_list = [s for s, m in zip(valid_smiles, ref_mask) if m]
-
-    dominant_labels, _ = assign_dominant_fg(ref_smiles_list)
-    label_counts = Counter(dominant_labels)
+def _build_fg_colour_map(label_counts):
+    """Build a consistent FG label -> colour mapping from label counts."""
     unique_labels = [lab for lab, _ in label_counts.most_common()]
-
     cmap = plt.cm.tab20
     label_to_colour = {}
     colour_idx = 0
@@ -598,6 +591,18 @@ def _prepare_panel_a_data(coords_2d, labels, valid_smiles):
         else:
             label_to_colour[lab] = cmap(colour_idx / max(len(unique_labels) - 1, 1))
             colour_idx += 1
+    return label_to_colour
+
+
+def _prepare_panel_a_data(coords_2d, labels, valid_smiles):
+    """Compute FG labels and colour map for panel (a). Returns reusable data."""
+    ref_mask = labels == "reference"
+    ref_coords = coords_2d[ref_mask]
+    ref_smiles_list = [s for s, m in zip(valid_smiles, ref_mask) if m]
+
+    dominant_labels, _ = assign_dominant_fg(ref_smiles_list)
+    label_counts = Counter(dominant_labels)
+    label_to_colour = _build_fg_colour_map(label_counts)
 
     return ref_coords, dominant_labels, label_counts, label_to_colour
 
@@ -625,6 +630,27 @@ def plot_panel_a(coords_2d, labels, valid_smiles, out_dir, dpi=300):
     fig.tight_layout()
     _save_fig(fig, out_dir, "panel_a_fg_reference", dpi)
     return ref_coords, dominant_labels, label_counts, label_to_colour
+
+
+def plot_fg_ga(coords_2d, labels, valid_smiles, label_to_colour, out_dir, dpi=300):
+    """FG-coloured UMAP of GA-explored molecules (same colour map as reference)."""
+    exp_mask = labels == "explored"
+    ga_coords = coords_2d[exp_mask]
+    ga_smiles_list = [s for s, m in zip(valid_smiles, exp_mask) if m]
+
+    dominant_labels, _ = assign_dominant_fg(ga_smiles_list)
+    label_counts = Counter(dominant_labels)
+
+    # Add any new FG labels not in the reference colour map
+    for lab in label_counts:
+        if lab not in label_to_colour:
+            label_to_colour[lab] = "#999999"
+
+    fig, ax = plt.subplots(figsize=PANEL_SIZE)
+    _draw_panel_a(ax, ga_coords, dominant_labels, label_counts, label_to_colour)
+    ax.set_title("GA Explored — Functional Groups", fontsize=12)
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "fg_ga_explored", dpi)
 
 
 def plot_panel_b(coords_2d, labels, out_dir, dpi=300):
@@ -866,7 +892,14 @@ def _generate_all_figures(coords_2d, labels, generations, fitness,
 
     # Standalone panel (a): FG-coloured reference
     print("\n  --- Panel (a): Functional group reference ---")
-    plot_panel_a(coords_2d, labels, valid_smiles, out_dir, dpi=dpi)
+    _, _, _, label_to_colour = plot_panel_a(coords_2d, labels, valid_smiles,
+                                            out_dir, dpi=dpi)
+
+    # FG-coloured GA explored (same colour map as reference)
+    exp_mask = labels == "explored"
+    if exp_mask.sum() > 0:
+        print("\n  --- FG GA explored ---")
+        plot_fg_ga(coords_2d, labels, valid_smiles, label_to_colour, out_dir, dpi=dpi)
 
     # Standalone panels (b), (c), (d)
     print("\n  --- Panel (b): Coverage ---")
@@ -881,16 +914,6 @@ def _generate_all_figures(coords_2d, labels, generations, fitness,
     # Combined 1x3 grid (coverage + generations + fitness)
     print("\n  --- Combined 1x3 grid ---")
     plot_combined_grid(coords_2d, labels, generations, fitness, out_dir, dpi=dpi)
-
-    # FG comparison: reference vs GA (requires both)
-    ref_mask = labels == "reference"
-    exp_mask = labels == "explored"
-    ref_smiles_list = [s for s, m in zip(valid_smiles, ref_mask) if m]
-    ga_smiles_list = [s for s, m in zip(valid_smiles, exp_mask) if m]
-
-    if ref_smiles_list and ga_smiles_list:
-        print("\n  --- FG comparison: reference vs GA ---")
-        plot_fg_comparison(ref_smiles_list, ga_smiles_list, out_dir, dpi=dpi)
 
     # FG over generations (requires GA dataframe)
     if ga_df is not None:
@@ -987,12 +1010,17 @@ def main():
                 ga_df.rename(columns={"CanonicalSMILES": "SMILES"}, inplace=True)
             print(f"  Loaded {len(ga_df)} GA molecules from {args.ga_csv}")
         elif args.sweep_dir is not None:
-            # Try to load from sweep dir
-            params, label, mean_fom = identify_top_config(args.sweep_dir)
-            seed_dirs = find_seed_dirs(args.sweep_dir, params)
-            if seed_dirs:
-                ga_df = load_ga_molecules(seed_dirs, sample_ga=args.sample_ga)
-                print(f"  Loaded {len(ga_df)} GA molecules from sweep dir")
+            # Try to load from sweep dir (best-effort — don't crash if missing)
+            try:
+                params, label, mean_fom = identify_top_config(args.sweep_dir)
+                seed_dirs = find_seed_dirs(args.sweep_dir, params)
+                if seed_dirs:
+                    ga_df = load_ga_molecules(seed_dirs, sample_ga=args.sample_ga)
+                    print(f"  Loaded {len(ga_df)} GA molecules from sweep dir")
+            except SystemExit:
+                print("  WARNING: Could not load GA data from sweep dir "
+                      "(configs_aggregated.csv missing?). Skipping FG-over-generations.")
+                ga_df = None
 
         _generate_all_figures(coords_2d, labels, generations, fitness,
                               valid_smiles, ga_df, args.out_dir, args.dpi)
