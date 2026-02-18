@@ -385,8 +385,8 @@ def evaluate_molecules(df, thermo_models, sc_model, tox21_models, biodeg_model, 
     df["h_40"] = df["Thermal_Conductivity_40C"] * np.power(df["Ra_40"].clip(lower=0), n_exp)
     df["h_100"] = df["Thermal_Conductivity_100C"] * np.power(df["Ra_100"].clip(lower=0), n_exp)
 
-    df["FOM1_40"] = df["Thermal_Conductivity_40C"] * ((df["beta_40"] * df["Cp_40"] * df["Density_40C_g_cm^3"]*2) / (df["nu_40"] * df["Thermal_Conductivity_40C"]))**0.2813
-    df["FOM1_100"] = df["Thermal_Conductivity_100C"] * ((df["beta_100"] * df["Cp_100"] * df["Density_100C_g_cm^3"]*2) / (df["nu_100"] * df["Thermal_Conductivity_100C"]))**0.2813
+    df["FOM1_40"] = df["Thermal_Conductivity_40C"] * ((df["beta_40"] * df["Cp_40"] * df["Density_40C_g_cm^3"]) / (df["nu_40"] * df["Thermal_Conductivity_40C"]))**0.2813
+    df["FOM1_100"] = df["Thermal_Conductivity_100C"] * ((df["beta_100"] * df["Cp_100"] * df["Density_100C_g_cm^3"]) / (df["nu_100"] * df["Thermal_Conductivity_100C"]))**0.2813
 
     # Prandtl number: Pr = nu / alpha = (mu * Cp) / k
     df["Pr_40"] = df["nu_40"] / df["alpha_40"]
