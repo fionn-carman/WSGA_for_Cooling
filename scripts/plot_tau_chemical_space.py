@@ -1,23 +1,23 @@
 """
-Chemical Space Analysis — Tau Sweep (Shared UMAP).
+Chemical Space Analysis — Tau Comparison (Shared UMAP).
 
-Loads ALL molecules from the tau sweep (all tau values x all seeds),
+Loads molecules from multiple tau configurations (tau/seed directories),
 fits a single shared UMAP embedding with the n-gram reference population,
-and generates a 2x4 grid figure showing chemical space coverage per tau.
+and generates a grid figure showing chemical space coverage per tau.
 
 The shared embedding ensures panels are directly comparable across tau values.
 
 Figures produced:
-  (grid) 2x4 coverage grid — one panel per tau value
-  (fg)   Side-by-side FG prevalence: reference vs GA (all tau combined)
+  (grid)       NxM coverage grid — one panel per tau value
+  (standalone) Individual coverage panels per tau (with invisible colorbars)
 
 Requirements:
     pip install umap-learn rdkit-pypi tqdm
 
 Usage:
-    python plot_tau_chemical_space.py --sweep_dir ../outputs/tau_sweep
-    python plot_tau_chemical_space.py --sweep_dir ../outputs/tau_sweep --no_cache
-    python plot_tau_chemical_space.py --npz path/to/tau_umap_cache.npz --out_dir ./figs
+    python plot_tau_chemical_space.py --sweep_dir ../outputs/tau_comparison
+    python plot_tau_chemical_space.py --sweep_dir ../outputs/tau_comparison --no_cache
+    python plot_tau_chemical_space.py --npz path/to/tau_umap_cache.npz
 """
 
 import os
@@ -71,7 +71,8 @@ except (ImportError, RuntimeError):
 from plot_chemical_space import (
     detect_functional_groups, smiles_to_fingerprint, fps_to_numpy,
     load_reference_set, _save_fig, FUNCTIONAL_GROUPS, FG_SHORT_NAMES,
-    plot_fg_comparison,
+    _robust_axis_limits, _add_invisible_colorbar, _add_side_colorbar,
+    PANEL_SIZE,
 )
 
 
@@ -80,7 +81,7 @@ from plot_chemical_space import (
 # ======================================================================
 
 def parse_tau_dir(dirname):
-    """Extract tau and seed from directory name."""
+    """Extract tau and seed from directory name like 'tau0.2_seed42'."""
     m = re.match(r"tau([\d.]+)_seed(\d+)", dirname)
     if not m:
         return None
@@ -171,7 +172,7 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
     """
     # Check cache
     if not no_cache and os.path.exists(cache_path):
-        print(f"  Loading cached UMAP from {cache_path}...")
+        print(f"  Loading cached UMAP from {os.path.abspath(cache_path)}...")
         data = np.load(cache_path, allow_pickle=True)
         return (
             data["coords_2d"],
@@ -275,7 +276,7 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
         tau_values=tau_arr,
         smiles=np.array(valid_smiles, dtype=object),
     )
-    print(f"  Cached UMAP to {cache_path}")
+    print(f"  Cached UMAP to {os.path.abspath(cache_path)}")
 
     return coords_2d, labels, generations, fitness, tau_arr, valid_smiles
 
@@ -284,25 +285,70 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
 # Figures
 # ======================================================================
 
+def _draw_tau_panel(ax, coords_2d, labels, tau_arr, tau_val):
+    """Draw a single tau coverage panel (reference + GA + top)."""
+    ref_mask = labels == "reference"
+    tau_exp_mask = (labels == "explored") & (np.abs(tau_arr - tau_val) < 1e-6)
+    tau_top_mask = (labels == "top") & (np.abs(tau_arr - tau_val) < 1e-6)
+
+    # Reference background
+    ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
+               c="#DDDDDD", s=3, alpha=0.3, label="Reference", rasterized=True)
+
+    # GA molecules for this tau
+    n_explored = tau_exp_mask.sum()
+    if n_explored > 0:
+        ax.scatter(coords_2d[tau_exp_mask, 0], coords_2d[tau_exp_mask, 1],
+                   c="#4C72B0", s=3, alpha=0.15,
+                   label=f"GA explored ({n_explored:,})", rasterized=True)
+
+    # Top molecules for this tau
+    n_top = tau_top_mask.sum()
+    if n_top > 0:
+        ax.scatter(coords_2d[tau_top_mask, 0], coords_2d[tau_top_mask, 1],
+                   c="red", s=30, alpha=0.9, marker="*",
+                   label=f"Top {n_top}", zorder=5)
+
+    # Shared axis limits from full embedding (percentile-clipped)
+    xlim, ylim = _robust_axis_limits(coords_2d)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+    ax.legend(fontsize=12, markerscale=2, frameon=False, loc="upper right")
+
+
 def plot_tau_coverage_grid(coords_2d, labels, tau_arr, tau_values,
                            out_dir, dpi=300):
-    """2x4 grid: one coverage panel per tau value, shared UMAP coordinates."""
-    ref_mask = labels == "reference"
-    ref_coords = coords_2d[ref_mask]
+    """Grid figure: one coverage panel per tau value, shared UMAP coordinates.
 
-    # Shared axis limits from full embedding
-    x_pad = (coords_2d[:, 0].max() - coords_2d[:, 0].min()) * 0.05
-    y_pad = (coords_2d[:, 1].max() - coords_2d[:, 1].min()) * 0.05
-    xlim = (coords_2d[:, 0].min() - x_pad, coords_2d[:, 0].max() + x_pad)
-    ylim = (coords_2d[:, 1].min() - y_pad, coords_2d[:, 1].max() + y_pad)
-
+    Adapts layout to number of tau values (1x2, 1x3, 2x4, etc.).
+    """
     n_tau = len(tau_values)
-    ncols = 4
-    nrows = (n_tau + ncols - 1) // ncols
 
-    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 6 * nrows))
-    if nrows == 1:
+    # Choose grid layout
+    if n_tau <= 2:
+        nrows, ncols = 1, n_tau
+    elif n_tau <= 4:
+        nrows, ncols = 1, n_tau
+    elif n_tau <= 8:
+        ncols = 4
+        nrows = (n_tau + ncols - 1) // ncols
+    else:
+        ncols = 4
+        nrows = (n_tau + ncols - 1) // ncols
+
+    fig, axes = plt.subplots(nrows, ncols,
+                             figsize=(7 * ncols, 7 * nrows))
+
+    # Normalise axes to 2D array
+    if n_tau == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
         axes = axes.reshape(1, -1)
+    elif ncols == 1:
+        axes = axes.reshape(-1, 1)
 
     panel_labels = [chr(ord("a") + i) for i in range(n_tau)]
 
@@ -310,41 +356,103 @@ def plot_tau_coverage_grid(coords_2d, labels, tau_arr, tau_values,
         row, col = divmod(idx, ncols)
         ax = axes[row, col]
 
-        # Reference background
-        ax.scatter(ref_coords[:, 0], ref_coords[:, 1],
-                   c="#DDDDDD", s=3, alpha=0.3, rasterized=True)
-
-        # GA molecules for this tau
-        tau_exp_mask = (labels == "explored") & (np.abs(tau_arr - tau_val) < 1e-6)
-        if tau_exp_mask.sum() > 0:
-            ax.scatter(coords_2d[tau_exp_mask, 0], coords_2d[tau_exp_mask, 1],
-                       c="#4C72B0", s=3, alpha=0.15, rasterized=True)
-
-        # Top molecules for this tau
-        tau_top_mask = (labels == "top") & (np.abs(tau_arr - tau_val) < 1e-6)
-        if tau_top_mask.sum() > 0:
-            ax.scatter(coords_2d[tau_top_mask, 0], coords_2d[tau_top_mask, 1],
-                       c="red", s=30, alpha=0.9, marker="*", zorder=5)
-
-        n_explored = tau_exp_mask.sum()
-        ax.set_title(f"\u03c4 = {tau_val:.2f}  (n={n_explored:,})", fontsize=11)
-        ax.set_xlim(xlim)
-        ax.set_ylim(ylim)
-        ax.set_xticks([])
-        ax.set_yticks([])
+        _draw_tau_panel(ax, coords_2d, labels, tau_arr, tau_val)
+        _add_invisible_colorbar(fig, ax)
 
         ax.text(0.02, 0.98, f"({panel_labels[idx]})", transform=ax.transAxes,
-                fontsize=14, fontweight="bold", va="top", ha="left")
+                fontsize=16, fontweight="bold", va="top", ha="left")
 
     # Hide unused axes
     for idx in range(n_tau, nrows * ncols):
         row, col = divmod(idx, ncols)
         axes[row, col].set_visible(False)
 
-    fig.suptitle("Chemical Space Coverage by Niching Threshold (\u03c4)",
-                 fontsize=15)
-    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.tight_layout()
     _save_fig(fig, out_dir, "tau_coverage_grid", dpi)
+
+
+def plot_tau_standalone_panels(coords_2d, labels, tau_arr, tau_values,
+                                out_dir, dpi=300):
+    """Individual standalone panel per tau value (with invisible colorbars)."""
+    for tau_val in tau_values:
+        fig, ax = plt.subplots(figsize=PANEL_SIZE)
+        _draw_tau_panel(ax, coords_2d, labels, tau_arr, tau_val)
+        _add_invisible_colorbar(fig, ax)
+        fig.tight_layout()
+
+        tau_str = f"{tau_val:.2f}".replace(".", "")
+        _save_fig(fig, out_dir, f"tau_{tau_str}_coverage", dpi)
+
+
+def _draw_tau_generations_panel(ax, coords_2d, labels, tau_arr, generations,
+                                tau_val, fig=None):
+    """Draw a generation-coloured panel for a single tau value."""
+    ref_mask = labels == "reference"
+    tau_exp_mask = (labels == "explored") & (np.abs(tau_arr - tau_val) < 1e-6)
+    tau_top_mask = (labels == "top") & (np.abs(tau_arr - tau_val) < 1e-6)
+
+    ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
+               c="#EEEEEE", s=2, alpha=0.2, rasterized=True)
+
+    gen_vals = generations[tau_exp_mask]
+    if len(gen_vals) > 0:
+        sc = ax.scatter(coords_2d[tau_exp_mask, 0], coords_2d[tau_exp_mask, 1],
+                        c=gen_vals, cmap="plasma", s=3, alpha=0.3, rasterized=True)
+        if fig is not None:
+            _add_side_colorbar(fig, ax, sc, "Generation")
+
+    if tau_top_mask.sum() > 0:
+        ax.scatter(coords_2d[tau_top_mask, 0], coords_2d[tau_top_mask, 1],
+                   c="red", s=30, alpha=0.9, marker="*", zorder=5)
+
+    xlim, ylim = _robust_axis_limits(coords_2d)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
+def plot_tau_generations_grid(coords_2d, labels, tau_arr, generations,
+                              tau_values, out_dir, dpi=300):
+    """Side-by-side generation-coloured panels, one per tau value."""
+    n_tau = len(tau_values)
+
+    if n_tau <= 2:
+        nrows, ncols = 1, n_tau
+    elif n_tau <= 4:
+        nrows, ncols = 1, n_tau
+    else:
+        ncols = 4
+        nrows = (n_tau + ncols - 1) // ncols
+
+    fig, axes = plt.subplots(nrows, ncols,
+                             figsize=(7 * ncols, 7 * nrows))
+
+    if n_tau == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
+        axes = axes.reshape(1, -1)
+    elif ncols == 1:
+        axes = axes.reshape(-1, 1)
+
+    panel_labels = [chr(ord("a") + i) for i in range(n_tau)]
+
+    for idx, tau_val in enumerate(tau_values):
+        row, col = divmod(idx, ncols)
+        ax = axes[row, col]
+
+        _draw_tau_generations_panel(ax, coords_2d, labels, tau_arr,
+                                    generations, tau_val, fig=fig)
+
+        ax.text(0.02, 0.98, f"({panel_labels[idx]})", transform=ax.transAxes,
+                fontsize=16, fontweight="bold", va="top", ha="left")
+
+    for idx in range(n_tau, nrows * ncols):
+        row, col = divmod(idx, ncols)
+        axes[row, col].set_visible(False)
+
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "tau_generations_grid", dpi)
 
 
 def print_coverage_stats_per_tau(coords_2d, labels, tau_arr, tau_values):
@@ -390,10 +498,10 @@ def print_coverage_stats_per_tau(coords_2d, labels, tau_arr, tau_values):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Chemical space analysis for the tau sweep (shared UMAP)"
+        description="Chemical space analysis for tau comparison (shared UMAP)"
     )
     parser.add_argument("--sweep_dir", type=str, default=None,
-                        help="Tau sweep directory (e.g. ../outputs/tau_sweep)")
+                        help="Directory containing tau{X}_seed{Y} subdirectories")
     parser.add_argument("--npz", type=str, default=None,
                         help="Path to existing .npz UMAP cache — replot only")
     parser.add_argument("--data_dir", type=str, default=None,
@@ -424,11 +532,12 @@ def main():
     if args.ref_csv is None:
         args.ref_csv = os.path.join(repo_root, "data", "ngram_reference_10k.csv")
 
+    # Output dir priority: npz location > sweep_dir/analysis
     if args.out_dir is None:
-        if args.sweep_dir is not None:
-            args.out_dir = os.path.join(args.sweep_dir, "analysis", "chemical_space")
-        elif args.npz is not None:
+        if args.npz is not None:
             args.out_dir = os.path.dirname(os.path.abspath(args.npz))
+        elif args.sweep_dir is not None:
+            args.out_dir = os.path.join(args.sweep_dir, "analysis", "chemical_space")
         else:
             args.out_dir = "."
 
@@ -453,26 +562,26 @@ def main():
         coords_2d = data["coords_2d"]
         labels = data["labels"]
         generations = data["generations"]
-        fitness = data["fitness"]
         tau_arr = data["tau_values"]
         valid_smiles = data["smiles"].tolist()
 
         tau_values = sorted(set(tau_arr[tau_arr >= 0]))
         print(f"  Loaded {len(labels)} points, {len(tau_values)} tau values")
+        for tv in tau_values:
+            n = ((labels == "explored") & (np.abs(tau_arr - tv) < 1e-6)).sum()
+            print(f"    tau={tv:.2f}: {n} explored molecules")
 
-        # Generate figures
         print("\n  --- Tau coverage grid ---")
         plot_tau_coverage_grid(coords_2d, labels, tau_arr, tau_values,
                                args.out_dir, dpi=args.dpi)
 
-        # FG comparison: reference vs all GA
-        ref_mask = labels == "reference"
-        exp_mask = labels == "explored"
-        ref_smi = [s for s, m in zip(valid_smiles, ref_mask) if m]
-        ga_smi = [s for s, m in zip(valid_smiles, exp_mask) if m]
-        if ref_smi and ga_smi:
-            print("\n  --- FG comparison ---")
-            plot_fg_comparison(ref_smi, ga_smi, args.out_dir, dpi=args.dpi)
+        print("\n  --- Tau generations grid ---")
+        plot_tau_generations_grid(coords_2d, labels, tau_arr, generations,
+                                  tau_values, args.out_dir, dpi=args.dpi)
+
+        print("\n  --- Standalone panels ---")
+        plot_tau_standalone_panels(coords_2d, labels, tau_arr, tau_values,
+                                   args.out_dir, dpi=args.dpi)
 
         print_coverage_stats_per_tau(coords_2d, labels, tau_arr, tau_values)
         return
@@ -526,21 +635,20 @@ def main():
     plot_tau_coverage_grid(coords_2d, labels, tau_arr, tau_values,
                            args.out_dir, dpi=args.dpi)
 
-    # FG comparison: reference vs all GA combined
-    ref_mask = labels == "reference"
-    exp_mask = labels == "explored"
-    ref_smi = [s for s, m in zip(valid_smiles, ref_mask) if m]
-    ga_smi = [s for s, m in zip(valid_smiles, exp_mask) if m]
-    if ref_smi and ga_smi:
-        print("\n  --- FG comparison: reference vs GA ---")
-        plot_fg_comparison(ref_smi, ga_smi, args.out_dir, dpi=args.dpi)
+    print("\n  --- Tau generations grid ---")
+    plot_tau_generations_grid(coords_2d, labels, tau_arr, generations,
+                              tau_values, args.out_dir, dpi=args.dpi)
+
+    print("\n  --- Standalone panels ---")
+    plot_tau_standalone_panels(coords_2d, labels, tau_arr, tau_values,
+                               args.out_dir, dpi=args.dpi)
 
     # ==================================================================
     # 5. Coverage statistics
     # ==================================================================
     print_coverage_stats_per_tau(coords_2d, labels, tau_arr, tau_values)
 
-    print(f"\nAll figures saved to: {args.out_dir}/")
+    print(f"\nAll figures saved to: {os.path.abspath(args.out_dir)}/")
     print("Done.")
 
 
