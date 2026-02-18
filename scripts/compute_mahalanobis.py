@@ -42,6 +42,7 @@ except ImportError:
         return iterable
 
 from scipy.stats import chi2
+from sklearn.covariance import LedoitWolf
 
 # Add src/ to path for descriptor imports
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -104,6 +105,13 @@ def compute_mahal_for_model(eval_desc_df, training_dir, models_dir,
                             target, threshold_pct=0.975):
     """Compute Mahalanobis distance for evaluated molecules against one model.
 
+    Uses Ledoit-Wolf shrinkage for robust covariance estimation (critical
+    when n_features is a sizeable fraction of n_training_samples).
+
+    The OOD threshold is set as the empirical percentile of the training
+    set's own D_M^2 distribution rather than a chi-squared approximation,
+    which assumes multivariate normality that RDKit descriptors violate.
+
     Parameters
     ----------
     eval_desc_df : DataFrame
@@ -115,7 +123,7 @@ def compute_mahal_for_model(eval_desc_df, training_dir, models_dir,
     target : str
         Model/property name.
     threshold_pct : float
-        Chi-squared percentile for OOD threshold (default 0.975).
+        Percentile for OOD threshold (default 0.975).
 
     Returns
     -------
@@ -163,28 +171,35 @@ def compute_mahal_for_model(eval_desc_df, training_dir, models_dir,
 
     n_train, n_feat = X_train.shape
 
-    # Training-set statistics
-    mu = X_train.mean(axis=0)
-    cov = np.cov(X_train, rowvar=False)
+    # Ledoit-Wolf shrinkage covariance estimation
+    lw = LedoitWolf().fit(X_train)
+    mu = lw.location_
+    cov_inv = lw.precision_   # already the inverse covariance
+    shrinkage = lw.shrinkage_
 
-    # Regularise covariance for numerical stability
-    if cov.ndim == 0:
-        # Single feature edge case
-        cov = np.array([[float(cov)]])
-    cov_reg = cov + 1e-6 * np.eye(n_feat)
+    print(f"    Ledoit-Wolf shrinkage coefficient: {shrinkage:.4f} "
+          f"(n_train={n_train}, n_feat={n_feat})")
 
-    try:
-        cov_inv = np.linalg.inv(cov_reg)
-    except np.linalg.LinAlgError:
-        cov_inv = np.linalg.pinv(cov_reg)
+    # Compute D_M^2 for training set to establish empirical threshold
+    diff_train = X_train - mu
+    train_mahal_sq = np.sum(diff_train @ cov_inv * diff_train, axis=1)
+    train_mahal_sq = np.maximum(train_mahal_sq, 0)
+
+    # Empirical threshold from training distribution
+    threshold_sq = np.percentile(train_mahal_sq, 100 * threshold_pct)
+    chi2_threshold_sq = chi2.ppf(threshold_pct, df=n_feat)
+
+    train_median_dm = np.sqrt(np.median(train_mahal_sq))
+    train_p975_dm = np.sqrt(threshold_sq)
+    print(f"    Training D_M: median={train_median_dm:.2f}, "
+          f"p97.5={train_p975_dm:.2f}")
+    print(f"    Empirical threshold (D_M^2): {threshold_sq:.1f} "
+          f"vs chi2: {chi2_threshold_sq:.1f}")
 
     # Compute Mahalanobis distance for each evaluated molecule
     n_eval = len(X_eval)
     mahal = np.full(n_eval, np.nan)
     ood = np.zeros(n_eval, dtype=int)
-
-    # Chi-squared threshold
-    threshold_sq = chi2.ppf(threshold_pct, df=n_feat)
 
     # Identify rows with any NaN in eval descriptors
     eval_valid = ~np.isnan(X_eval).any(axis=1)
@@ -300,10 +315,8 @@ def main():
         n_ood = (ood == 1).sum()
         n_id = (ood == 0).sum()
         median_d = np.nanmedian(mahal)
-        threshold_sq = chi2.ppf(args.threshold, df=n_feat) if n_feat > 0 else 0
-        print(f"    Features: {n_feat}, Threshold (D_M): {np.sqrt(threshold_sq):.2f}")
         print(f"    In-domain: {n_id}, OOD: {n_ood} ({100*n_ood/n_mols:.1f}%)")
-        print(f"    Median D_M: {median_d:.2f}")
+        print(f"    Eval median D_M: {median_d:.2f}")
 
     # ── Step 4: Summary columns ──
     print(f"\n{'='*60}")
