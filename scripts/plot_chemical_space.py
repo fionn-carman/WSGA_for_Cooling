@@ -681,6 +681,7 @@ def plot_panel_a(coords_2d, labels, valid_smiles, out_dir, dominant_fgs=None,
     fig, ax = plt.subplots(figsize=PANEL_SIZE)
     _draw_panel_a(ax, ref_coords, dominant_labels, label_counts, label_to_colour,
                   all_coords=coords_2d)
+    _add_invisible_colorbar(fig, ax)
     fig.tight_layout()
     _save_fig(fig, out_dir, "panel_a_fg_reference", dpi)
     return ref_coords, dominant_labels, label_counts, label_to_colour
@@ -708,6 +709,7 @@ def plot_fg_ga(coords_2d, labels, valid_smiles, label_to_colour, out_dir,
     fig, ax = plt.subplots(figsize=PANEL_SIZE)
     _draw_panel_a(ax, ga_coords, dominant_labels, label_counts, label_to_colour,
                   all_coords=coords_2d)
+    _add_invisible_colorbar(fig, ax)
     fig.tight_layout()
     _save_fig(fig, out_dir, "fg_ga_explored", dpi)
 
@@ -734,9 +736,11 @@ def plot_fg_combined(coords_2d, labels, valid_smiles, out_dir,
 
     _draw_panel_a(axes[0], ref_coords, dominant_labels_ref, label_counts_ref,
                   label_to_colour, all_coords=coords_2d)
+    _add_invisible_colorbar(fig, axes[0])
 
     _draw_panel_a(axes[1], ga_coords, dominant_labels_ga, label_counts_ga,
                   label_to_colour, all_coords=coords_2d)
+    _add_invisible_colorbar(fig, axes[1])
 
     for ax, lab in zip(axes, ["(a)", "(b)"]):
         ax.text(0.02, 0.98, lab, transform=ax.transAxes,
@@ -791,6 +795,7 @@ def plot_panel_validity(coords_2d, labels, is_valid, out_dir, dpi=300):
     """Standalone validity UMAP."""
     fig, ax = plt.subplots(figsize=PANEL_SIZE)
     _draw_panel_validity(ax, coords_2d, labels, is_valid)
+    _add_invisible_colorbar(fig, ax)
     fig.tight_layout()
     _save_fig(fig, out_dir, "panel_validity", dpi)
 
@@ -799,6 +804,7 @@ def plot_panel_b(coords_2d, labels, out_dir, dpi=300):
     """Standalone panel (b): Coverage overlay."""
     fig, ax = plt.subplots(figsize=PANEL_SIZE)
     _draw_panel_b(ax, coords_2d, labels)
+    _add_invisible_colorbar(fig, ax)
     fig.tight_layout()
     _save_fig(fig, out_dir, "panel_b_coverage", dpi)
 
