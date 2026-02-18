@@ -487,8 +487,19 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
 
         gen_stats = load_generation_stats(run_path)
 
-        best = top_df.iloc[0]
-        top10 = top_df.head(10)
+        # Filter to molecules with MP < -30 before selecting best
+        mp_col = "MP-Measured"
+        if mp_col in top_df.columns:
+            mp_valid = top_df[top_df[mp_col] < -30]
+        else:
+            mp_valid = top_df
+
+        if mp_valid.empty:
+            skipped += 1
+            continue
+
+        best = mp_valid.iloc[0]
+        top10 = mp_valid.head(10)
 
         run_info = {
             k: v for k, v in params.items() if k != "format"
@@ -628,6 +639,9 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
         combined = pd.concat(all_top_mols, ignore_index=True)
         smiles_col = "CanonicalSMILES" if "CanonicalSMILES" in combined.columns else "SMILES"
         sort_col = "FOM1_avg" if "FOM1_avg" in combined.columns else "FitnessScore"
+        # Filter to molecules with MP < -30
+        if "MP-Measured" in combined.columns:
+            combined = combined[combined["MP-Measured"] < -30]
         combined = combined.sort_values(sort_col, ascending=False)
         unique = combined.drop_duplicates(subset=[smiles_col], keep="first")
         top_unique = unique.head(top_n_molecules)
