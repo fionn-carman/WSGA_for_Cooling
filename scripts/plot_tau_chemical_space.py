@@ -455,6 +455,106 @@ def plot_tau_generations_grid(coords_2d, labels, tau_arr, generations,
     _save_fig(fig, out_dir, "tau_generations_grid", dpi)
 
 
+def _draw_tau_fitness_panel(ax, coords_2d, labels, tau_arr, fitness,
+                            tau_val, fig=None):
+    """Draw a fitness-landscape panel for a single tau value."""
+    ref_mask = labels == "reference"
+    tau_exp_mask = (labels == "explored") & (np.abs(tau_arr - tau_val) < 1e-6)
+    tau_top_mask = (labels == "top") & (np.abs(tau_arr - tau_val) < 1e-6)
+
+    ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
+               c="#EEEEEE", s=2, alpha=0.2, rasterized=True)
+
+    fit_vals = fitness[tau_exp_mask]
+    valid_fit = fit_vals[fit_vals > 0]
+    if len(valid_fit) > 0:
+        vmin, vmax = np.percentile(valid_fit, [5, 95])
+        sc = ax.scatter(coords_2d[tau_exp_mask, 0], coords_2d[tau_exp_mask, 1],
+                        c=fit_vals, cmap="viridis", s=3, alpha=0.3,
+                        vmin=vmin, vmax=vmax, rasterized=True)
+        if fig is not None:
+            _add_side_colorbar(fig, ax, sc, "FOM1 (avg)")
+
+    if tau_top_mask.sum() > 0:
+        ax.scatter(coords_2d[tau_top_mask, 0], coords_2d[tau_top_mask, 1],
+                   c="red", s=30, alpha=0.9, marker="*", zorder=5)
+
+    xlim, ylim = _robust_axis_limits(coords_2d)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
+def plot_tau_fitness_grid(coords_2d, labels, tau_arr, fitness,
+                          tau_values, out_dir, dpi=300):
+    """Side-by-side fitness-landscape panels, one per tau value."""
+    n_tau = len(tau_values)
+
+    if n_tau <= 2:
+        nrows, ncols = 1, n_tau
+    elif n_tau <= 4:
+        nrows, ncols = 1, n_tau
+    else:
+        ncols = 4
+        nrows = (n_tau + ncols - 1) // ncols
+
+    fig, axes = plt.subplots(nrows, ncols,
+                             figsize=(7 * ncols, 7 * nrows))
+
+    if n_tau == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
+        axes = axes.reshape(1, -1)
+    elif ncols == 1:
+        axes = axes.reshape(-1, 1)
+
+    panel_labels = [chr(ord("a") + i) for i in range(n_tau)]
+
+    for idx, tau_val in enumerate(tau_values):
+        row, col = divmod(idx, ncols)
+        ax = axes[row, col]
+
+        _draw_tau_fitness_panel(ax, coords_2d, labels, tau_arr,
+                                fitness, tau_val, fig=fig)
+
+        ax.text(0.02, 0.98, f"({panel_labels[idx]})", transform=ax.transAxes,
+                fontsize=16, fontweight="bold", va="top", ha="left")
+
+    for idx in range(n_tau, nrows * ncols):
+        row, col = divmod(idx, ncols)
+        axes[row, col].set_visible(False)
+
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "tau_fitness_grid", dpi)
+
+
+def plot_tau_standalone_fitness(coords_2d, labels, tau_arr, fitness,
+                                tau_values, out_dir, dpi=300):
+    """Individual standalone fitness panels per tau value."""
+    for tau_val in tau_values:
+        fig, ax = plt.subplots(figsize=PANEL_SIZE)
+        _draw_tau_fitness_panel(ax, coords_2d, labels, tau_arr,
+                                fitness, tau_val, fig=fig)
+        fig.tight_layout()
+
+        tau_str = f"{tau_val:.2f}".replace(".", "")
+        _save_fig(fig, out_dir, f"tau_{tau_str}_fitness", dpi)
+
+
+def plot_tau_standalone_generations(coords_2d, labels, tau_arr, generations,
+                                    tau_values, out_dir, dpi=300):
+    """Individual standalone generation panels per tau value."""
+    for tau_val in tau_values:
+        fig, ax = plt.subplots(figsize=PANEL_SIZE)
+        _draw_tau_generations_panel(ax, coords_2d, labels, tau_arr,
+                                    generations, tau_val, fig=fig)
+        fig.tight_layout()
+
+        tau_str = f"{tau_val:.2f}".replace(".", "")
+        _save_fig(fig, out_dir, f"tau_{tau_str}_generations", dpi)
+
+
 def print_coverage_stats_per_tau(coords_2d, labels, tau_arr, tau_values):
     """Print grid-based coverage statistics per tau value."""
     ref_mask = labels == "reference"
@@ -579,9 +679,22 @@ def main():
         plot_tau_generations_grid(coords_2d, labels, tau_arr, generations,
                                   tau_values, args.out_dir, dpi=args.dpi)
 
-        print("\n  --- Standalone panels ---")
+        fitness = data["fitness"] if "fitness" in data else np.zeros(len(labels))
+        print("\n  --- Tau fitness grid ---")
+        plot_tau_fitness_grid(coords_2d, labels, tau_arr, fitness,
+                              tau_values, args.out_dir, dpi=args.dpi)
+
+        print("\n  --- Standalone coverage panels ---")
         plot_tau_standalone_panels(coords_2d, labels, tau_arr, tau_values,
                                    args.out_dir, dpi=args.dpi)
+
+        print("\n  --- Standalone generation panels ---")
+        plot_tau_standalone_generations(coords_2d, labels, tau_arr, generations,
+                                        tau_values, args.out_dir, dpi=args.dpi)
+
+        print("\n  --- Standalone fitness panels ---")
+        plot_tau_standalone_fitness(coords_2d, labels, tau_arr, fitness,
+                                    tau_values, args.out_dir, dpi=args.dpi)
 
         print_coverage_stats_per_tau(coords_2d, labels, tau_arr, tau_values)
         return
@@ -639,9 +752,21 @@ def main():
     plot_tau_generations_grid(coords_2d, labels, tau_arr, generations,
                               tau_values, args.out_dir, dpi=args.dpi)
 
-    print("\n  --- Standalone panels ---")
+    print("\n  --- Tau fitness grid ---")
+    plot_tau_fitness_grid(coords_2d, labels, tau_arr, fitness,
+                          tau_values, args.out_dir, dpi=args.dpi)
+
+    print("\n  --- Standalone coverage panels ---")
     plot_tau_standalone_panels(coords_2d, labels, tau_arr, tau_values,
                                args.out_dir, dpi=args.dpi)
+
+    print("\n  --- Standalone generation panels ---")
+    plot_tau_standalone_generations(coords_2d, labels, tau_arr, generations,
+                                    tau_values, args.out_dir, dpi=args.dpi)
+
+    print("\n  --- Standalone fitness panels ---")
+    plot_tau_standalone_fitness(coords_2d, labels, tau_arr, fitness,
+                                tau_values, args.out_dir, dpi=args.dpi)
 
     # ==================================================================
     # 5. Coverage statistics
