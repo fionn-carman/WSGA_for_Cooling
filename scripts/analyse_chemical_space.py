@@ -316,12 +316,10 @@ def plot_umap_exploration(umap_coords, labels, generation, fitness, out_dir):
     fig.suptitle("Chemical Space Exploration — UMAP Projection of Morgan Fingerprints",
                  fontsize=14, y=1.02)
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "umap_chemical_space.png"),
-                dpi=300, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "umap_chemical_space.pdf"),
-                bbox_inches="tight")
+    path = os.path.join(out_dir, "umap_chemical_space.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved: umap_chemical_space.png/pdf")
+    print(f"  Saved: {os.path.abspath(path)}")
 
 
 def plot_exploration_trajectory(umap_coords, labels, generation, out_dir,
@@ -387,12 +385,10 @@ def plot_exploration_trajectory(umap_coords, labels, generation, out_dir,
     ax.set_yticks([])
 
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "umap_trajectory.png"),
-                dpi=300, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "umap_trajectory.pdf"),
-                bbox_inches="tight")
+    path = os.path.join(out_dir, "umap_trajectory.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved: umap_trajectory.png/pdf")
+    print(f"  Saved: {os.path.abspath(path)}")
 
 
 def plot_functional_groups_over_generations(eval_df, out_dir, n_gen_bins=8):
@@ -461,12 +457,10 @@ def plot_functional_groups_over_generations(eval_df, out_dir, n_gen_bins=8):
     ax.tick_params(labelsize=10)
 
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "functional_groups_over_generations.png"),
-                dpi=300, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "functional_groups_over_generations.pdf"),
-                bbox_inches="tight")
+    path = os.path.join(out_dir, "functional_groups_over_generations.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved: functional_groups_over_generations.png/pdf")
+    print(f"  Saved: {os.path.abspath(path)}")
 
 
 # ======================================================================

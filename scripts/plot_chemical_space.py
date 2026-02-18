@@ -619,13 +619,11 @@ def _prepare_panel_a_data(coords_2d, labels, valid_smiles, dominant_fgs=None):
 
 
 def _save_fig(fig, out_dir, basename, dpi=300):
-    """Save figure as PNG + PDF with consistent settings."""
-    fig.savefig(os.path.join(out_dir, f"{basename}.png"),
-                dpi=dpi, bbox_inches="tight", pad_inches=0.1)
-    fig.savefig(os.path.join(out_dir, f"{basename}.pdf"),
-                bbox_inches="tight", pad_inches=0.1)
+    """Save figure as PNG with consistent settings."""
+    path = os.path.join(out_dir, f"{basename}.png")
+    fig.savefig(path, dpi=dpi, bbox_inches="tight", pad_inches=0.1)
     plt.close(fig)
-    print(f"  Saved: {basename}.png/pdf")
+    print(f"  Saved: {os.path.abspath(path)}")
 
 
 PANEL_SIZE = (7, 7)  # consistent size for all standalone panels
@@ -784,12 +782,7 @@ def plot_fg_over_generations(ga_df, out_dir, n_gen_bins=8, dpi=300):
     ax.tick_params(labelsize=10)
 
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "fg_over_generations.png"),
-                dpi=dpi, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "fg_over_generations.pdf"),
-                bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Saved: fg_over_generations.png/pdf")
+    _save_fig(fig, out_dir, "fg_over_generations", dpi)
 
 
 def plot_fg_comparison(ref_smiles_list, ga_smiles_list, out_dir, dpi=300):

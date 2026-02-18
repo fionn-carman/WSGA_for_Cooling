@@ -101,10 +101,10 @@ def plot_fom1_vs_tau(runs_df, out_dir):
                     ha="center", fontsize=8, color="gray")
 
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "fom1_vs_tau.png"), dpi=300, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "fom1_vs_tau.pdf"), bbox_inches="tight")
+    path = os.path.join(out_dir, "fom1_vs_tau.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved: fom1_vs_tau.png/pdf")
+    print(f"  Saved: {os.path.abspath(path)}")
 
 
 def plot_top10_vs_tau(runs_df, out_dir):
@@ -123,10 +123,10 @@ def plot_top10_vs_tau(runs_df, out_dir):
     ax.tick_params(labelsize=10)
 
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "top10_vs_tau.png"), dpi=300, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "top10_vs_tau.pdf"), bbox_inches="tight")
+    path = os.path.join(out_dir, "top10_vs_tau.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved: top10_vs_tau.png/pdf")
+    print(f"  Saved: {os.path.abspath(path)}")
 
 
 def plot_convergence_by_tau(runs_df, sweep_dir, out_dir):
@@ -171,10 +171,10 @@ def plot_convergence_by_tau(runs_df, sweep_dir, out_dir):
     ax.tick_params(labelsize=10)
 
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "convergence_by_tau.png"), dpi=300, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "convergence_by_tau.pdf"), bbox_inches="tight")
+    path = os.path.join(out_dir, "convergence_by_tau.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved: convergence_by_tau.png/pdf")
+    print(f"  Saved: {os.path.abspath(path)}")
 
 
 def plot_diversity_vs_tau(runs_df, sweep_dir, out_dir, n_mols=25):
@@ -250,10 +250,10 @@ def plot_diversity_vs_tau(runs_df, sweep_dir, out_dir, n_mols=25):
             ha="right", fontsize=9, color="red", alpha=0.7)
 
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "diversity_vs_tau.png"), dpi=300, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "diversity_vs_tau.pdf"), bbox_inches="tight")
+    path = os.path.join(out_dir, "diversity_vs_tau.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved: diversity_vs_tau.png/pdf")
+    print(f"  Saved: {os.path.abspath(path)}")
 
     return div_df
 
@@ -320,10 +320,10 @@ def plot_scaffold_count_vs_tau(runs_df, sweep_dir, out_dir, n_mols=25):
     ax.tick_params(labelsize=10)
 
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "scaffold_count_vs_tau.png"), dpi=300, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "scaffold_count_vs_tau.pdf"), bbox_inches="tight")
+    path = os.path.join(out_dir, "scaffold_count_vs_tau.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved: scaffold_count_vs_tau.png/pdf")
+    print(f"  Saved: {os.path.abspath(path)}")
 
 
 # ======================================================================

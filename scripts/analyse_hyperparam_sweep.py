@@ -164,10 +164,10 @@ def plot_pairwise_heatmaps(runs_df, group_cols, out_dir):
 
     fig.suptitle("Pairwise Hyperparameter Interaction — Mean Best FOM1", fontsize=14, y=1.01)
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "heatmaps_pairwise.png"), dpi=300, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "heatmaps_pairwise.pdf"), bbox_inches="tight")
+    path = os.path.join(out_dir, "heatmaps_pairwise.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved: heatmaps_pairwise.png/pdf")
+    print(f"  Saved: {os.path.abspath(path)}")
 
 
 def plot_marginal_boxplots(runs_df, group_cols, out_dir):
@@ -195,10 +195,10 @@ def plot_marginal_boxplots(runs_df, group_cols, out_dir):
 
     fig.suptitle("Marginal Effect of Each Hyperparameter on Best FOM1", fontsize=14)
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "boxplots_marginal.png"), dpi=300, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "boxplots_marginal.pdf"), bbox_inches="tight")
+    path = os.path.join(out_dir, "boxplots_marginal.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved: boxplots_marginal.png/pdf")
+    print(f"  Saved: {os.path.abspath(path)}")
 
 
 def plot_convergence_curves(runs_df, group_cols, sweep_dir, out_dir, top_n=5):
@@ -252,10 +252,10 @@ def plot_convergence_curves(runs_df, group_cols, sweep_dir, out_dir, top_n=5):
     ax.legend(fontsize=9, loc="lower right")
     ax.tick_params(labelsize=10)
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "convergence_curves.png"), dpi=300, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "convergence_curves.pdf"), bbox_inches="tight")
+    path = os.path.join(out_dir, "convergence_curves.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved: convergence_curves.png/pdf")
+    print(f"  Saved: {os.path.abspath(path)}")
 
 
 def plot_parallel_coordinates(configs_df, group_cols, out_dir):
@@ -323,10 +323,10 @@ def plot_parallel_coordinates(configs_df, group_cols, out_dir):
     cbar.set_label("Mean Best FOM1 (avg)", fontsize=11)
 
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "parallel_coordinates.png"), dpi=300, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "parallel_coordinates.pdf"), bbox_inches="tight")
+    path = os.path.join(out_dir, "parallel_coordinates.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved: parallel_coordinates.png/pdf")
+    print(f"  Saved: {os.path.abspath(path)}")
 
 
 def plot_structural_similarity(top_unique, smiles_col, out_dir, n_mols=50):
@@ -384,12 +384,10 @@ def plot_structural_similarity(top_unique, smiles_col, out_dir, n_mols=50):
     cbar.set_label("Tanimoto Similarity", fontsize=11)
 
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "structural_similarity_heatmap.png"),
-                dpi=300, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "structural_similarity_heatmap.pdf"),
-                bbox_inches="tight")
+    path = os.path.join(out_dir, "structural_similarity_heatmap.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved: structural_similarity_heatmap.png/pdf")
+    print(f"  Saved: {os.path.abspath(path)}")
 
     return sim_matrix, valid_smiles
 
@@ -453,12 +451,10 @@ def plot_scaffold_distribution(top_unique, smiles_col, out_dir, n_mols=50, top_s
                 str(count), va="center", fontsize=10)
 
     fig.tight_layout()
-    fig.savefig(os.path.join(out_dir, "scaffold_distribution.png"),
-                dpi=300, bbox_inches="tight")
-    fig.savefig(os.path.join(out_dir, "scaffold_distribution.pdf"),
-                bbox_inches="tight")
+    path = os.path.join(out_dir, "scaffold_distribution.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved: scaffold_distribution.png/pdf")
+    print(f"  Saved: {os.path.abspath(path)}")
 
 
 # ======================================================================

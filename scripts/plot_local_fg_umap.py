@@ -296,12 +296,9 @@ def main():
 
     fig.tight_layout()
     out_png = os.path.join(args.out_dir, "ngram_fg_umap.png")
-    out_pdf = os.path.join(args.out_dir, "ngram_fg_umap.pdf")
     fig.savefig(out_png, dpi=300, bbox_inches="tight")
-    fig.savefig(out_pdf, bbox_inches="tight")
     plt.close(fig)
-    print(f"\n  Saved: {out_png}")
-    print(f"  Saved: {out_pdf}")
+    print(f"\n  Saved: {os.path.abspath(out_png)}")
 
     # ------------------------------------------------------------------
     # 6. Plot: per-FG panels
@@ -350,12 +347,9 @@ def main():
                      f"({n_mol} molecules, 8-gram model)", fontsize=14, y=1.02)
         fig.tight_layout()
         out_panels_png = os.path.join(args.out_dir, "ngram_fg_panels.png")
-        out_panels_pdf = os.path.join(args.out_dir, "ngram_fg_panels.pdf")
         fig.savefig(out_panels_png, dpi=300, bbox_inches="tight")
-        fig.savefig(out_panels_pdf, bbox_inches="tight")
         plt.close(fig)
-        print(f"  Saved: {out_panels_png}")
-        print(f"  Saved: {out_panels_pdf}")
+        print(f"  Saved: {os.path.abspath(out_panels_png)}")
 
     print(f"\nAll outputs in: {args.out_dir}/")
     print("Done.")
