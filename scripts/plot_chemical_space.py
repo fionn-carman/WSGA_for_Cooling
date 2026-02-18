@@ -516,7 +516,7 @@ def _draw_panel_b(ax, coords_2d, labels):
     ax.set_yticks([])
 
 
-def _robust_axis_limits(coords_2d, margin=0.03, percentile=0.5):
+def _robust_axis_limits(coords_2d, margin=0.08, percentile=0.5):
     """Compute axis limits that exclude extreme outliers.
 
     Uses the given percentile to trim outliers from each side, then adds
@@ -539,7 +539,7 @@ def _apply_axis_limits(ax, coords_2d):
 
 _CBAR_FRACTION = 0.046
 _CBAR_PAD = 0.02
-_CBAR_SHRINK = 0.85
+_CBAR_SHRINK = 1.0
 
 
 def _add_side_colorbar(fig, ax, mappable, label):
