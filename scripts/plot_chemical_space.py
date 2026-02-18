@@ -979,10 +979,10 @@ def main():
         args.ref_csv = os.path.join(repo_root, "data", "ngram_reference_10k.csv")
 
     if args.out_dir is None:
-        if args.sweep_dir is not None:
-            args.out_dir = os.path.join(args.sweep_dir, "analysis", "chemical_space")
-        elif args.npz is not None:
+        if args.npz is not None:
             args.out_dir = os.path.dirname(os.path.abspath(args.npz))
+        elif args.sweep_dir is not None:
+            args.out_dir = os.path.join(args.sweep_dir, "analysis", "chemical_space")
         else:
             args.out_dir = "."
 
