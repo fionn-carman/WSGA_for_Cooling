@@ -353,18 +353,20 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
     """Compute shared UMAP or load from cache.
 
     Returns:
-        coords_2d, labels, generations, fitness, valid_smiles
+        coords_2d, labels, generations, fitness, valid_smiles, dominant_fgs
     """
     # Check cache
     if not no_cache and os.path.exists(cache_path):
         print(f"  Loading cached UMAP from {cache_path}...")
         data = np.load(cache_path, allow_pickle=True)
+        dominant_fgs = data["dominant_fgs"] if "dominant_fgs" in data else None
         return (
             data["coords_2d"],
             data["labels"],
             data["generations"],
             data["fitness"],
             data["smiles"].tolist(),
+            dominant_fgs,
         )
 
     # Determine column names
@@ -437,6 +439,10 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
     coords_2d = reducer.fit_transform(fp_matrix)
     print(f"  UMAP complete: {coords_2d.shape}")
 
+    # Pre-compute dominant FG labels for caching
+    print("  Pre-computing dominant functional groups...")
+    dominant_fgs, _ = assign_dominant_fg(valid_smiles)
+
     # Save cache
     os.makedirs(os.path.dirname(os.path.abspath(cache_path)), exist_ok=True)
     np.savez_compressed(
@@ -446,10 +452,11 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
         generations=generations,
         fitness=fitness,
         smiles=np.array(valid_smiles, dtype=object),
+        dominant_fgs=dominant_fgs,
     )
     print(f"  Cached UMAP to {cache_path}")
 
-    return coords_2d, labels, generations, fitness, valid_smiles
+    return coords_2d, labels, generations, fitness, valid_smiles, dominant_fgs
 
 
 # ======================================================================
@@ -594,13 +601,17 @@ def _build_fg_colour_map(label_counts):
     return label_to_colour
 
 
-def _prepare_panel_a_data(coords_2d, labels, valid_smiles):
+def _prepare_panel_a_data(coords_2d, labels, valid_smiles, dominant_fgs=None):
     """Compute FG labels and colour map for panel (a). Returns reusable data."""
     ref_mask = labels == "reference"
     ref_coords = coords_2d[ref_mask]
-    ref_smiles_list = [s for s, m in zip(valid_smiles, ref_mask) if m]
 
-    dominant_labels, _ = assign_dominant_fg(ref_smiles_list)
+    if dominant_fgs is not None:
+        dominant_labels = dominant_fgs[ref_mask]
+    else:
+        ref_smiles_list = [s for s, m in zip(valid_smiles, ref_mask) if m]
+        dominant_labels, _ = assign_dominant_fg(ref_smiles_list)
+
     label_counts = Counter(dominant_labels)
     label_to_colour = _build_fg_colour_map(label_counts)
 
@@ -620,10 +631,11 @@ def _save_fig(fig, out_dir, basename, dpi=300):
 PANEL_SIZE = (7, 7)  # consistent size for all standalone panels
 
 
-def plot_panel_a(coords_2d, labels, valid_smiles, out_dir, dpi=300):
+def plot_panel_a(coords_2d, labels, valid_smiles, out_dir, dominant_fgs=None,
+                 dpi=300):
     """Standalone panel (a): FG-coloured reference population."""
     ref_coords, dominant_labels, label_counts, label_to_colour = \
-        _prepare_panel_a_data(coords_2d, labels, valid_smiles)
+        _prepare_panel_a_data(coords_2d, labels, valid_smiles, dominant_fgs)
 
     fig, ax = plt.subplots(figsize=PANEL_SIZE)
     _draw_panel_a(ax, ref_coords, dominant_labels, label_counts, label_to_colour)
@@ -632,13 +644,18 @@ def plot_panel_a(coords_2d, labels, valid_smiles, out_dir, dpi=300):
     return ref_coords, dominant_labels, label_counts, label_to_colour
 
 
-def plot_fg_ga(coords_2d, labels, valid_smiles, label_to_colour, out_dir, dpi=300):
+def plot_fg_ga(coords_2d, labels, valid_smiles, label_to_colour, out_dir,
+               dominant_fgs=None, dpi=300):
     """FG-coloured UMAP of GA-explored molecules (same colour map as reference)."""
     exp_mask = labels == "explored"
     ga_coords = coords_2d[exp_mask]
-    ga_smiles_list = [s for s, m in zip(valid_smiles, exp_mask) if m]
 
-    dominant_labels, _ = assign_dominant_fg(ga_smiles_list)
+    if dominant_fgs is not None:
+        dominant_labels = dominant_fgs[exp_mask]
+    else:
+        ga_smiles_list = [s for s, m in zip(valid_smiles, exp_mask) if m]
+        dominant_labels, _ = assign_dominant_fg(ga_smiles_list)
+
     label_counts = Counter(dominant_labels)
 
     # Add any new FG labels not in the reference colour map
@@ -884,7 +901,8 @@ def print_coverage_stats(coords_2d, labels, ga_df):
 # ======================================================================
 
 def _generate_all_figures(coords_2d, labels, generations, fitness,
-                          valid_smiles, ga_df, out_dir, dpi=300):
+                          valid_smiles, ga_df, out_dir, dominant_fgs=None,
+                          dpi=300):
     """Generate all figures from pre-computed UMAP data."""
     print(f"\n{'='*60}")
     print("  Generating figures")
@@ -893,13 +911,15 @@ def _generate_all_figures(coords_2d, labels, generations, fitness,
     # Standalone panel (a): FG-coloured reference
     print("\n  --- Panel (a): Functional group reference ---")
     _, _, _, label_to_colour = plot_panel_a(coords_2d, labels, valid_smiles,
-                                            out_dir, dpi=dpi)
+                                            out_dir, dominant_fgs=dominant_fgs,
+                                            dpi=dpi)
 
     # FG-coloured GA explored (same colour map as reference)
     exp_mask = labels == "explored"
     if exp_mask.sum() > 0:
         print("\n  --- FG GA explored ---")
-        plot_fg_ga(coords_2d, labels, valid_smiles, label_to_colour, out_dir, dpi=dpi)
+        plot_fg_ga(coords_2d, labels, valid_smiles, label_to_colour, out_dir,
+                   dominant_fgs=dominant_fgs, dpi=dpi)
 
     # Standalone panels (b), (c), (d)
     print("\n  --- Panel (b): Coverage ---")
@@ -996,11 +1016,16 @@ def main():
         generations = data["generations"]
         fitness = data["fitness"]
         valid_smiles = data["smiles"].tolist()
+        dominant_fgs = data["dominant_fgs"] if "dominant_fgs" in data else None
 
         print(f"  Loaded {len(labels)} points from {args.npz}")
         print(f"    Reference: {(labels == 'reference').sum()}")
         print(f"    Explored:  {(labels == 'explored').sum()}")
         print(f"    Top:       {(labels == 'top').sum()}")
+        if dominant_fgs is not None:
+            print(f"    FG labels:  cached ({len(dominant_fgs)})")
+        else:
+            print(f"    FG labels:  not cached (will recompute via SMARTS)")
 
         # Load GA dataframe if available (for FG-over-generations)
         ga_df = None
@@ -1023,7 +1048,8 @@ def main():
                 ga_df = None
 
         _generate_all_figures(coords_2d, labels, generations, fitness,
-                              valid_smiles, ga_df, args.out_dir, args.dpi)
+                              valid_smiles, ga_df, args.out_dir,
+                              dominant_fgs=dominant_fgs, dpi=args.dpi)
         return
 
     # ------------------------------------------------------------------
@@ -1077,15 +1103,17 @@ def main():
     print("  STEP 4: Compute UMAP embedding")
     print("=" * 60)
 
-    coords_2d, labels, generations, fitness, valid_smiles = compute_or_load_umap(
-        ref_smiles, ga_df, args.cache, no_cache=args.no_cache, n_top=args.n_top,
-    )
+    coords_2d, labels, generations, fitness, valid_smiles, dominant_fgs = \
+        compute_or_load_umap(
+            ref_smiles, ga_df, args.cache, no_cache=args.no_cache, n_top=args.n_top,
+        )
 
     # ==================================================================
     # 5-6. Generate figures + statistics
     # ==================================================================
     _generate_all_figures(coords_2d, labels, generations, fitness,
-                          valid_smiles, ga_df, args.out_dir, args.dpi)
+                          valid_smiles, ga_df, args.out_dir,
+                          dominant_fgs=dominant_fgs, dpi=args.dpi)
 
     print_coverage_stats(coords_2d, labels, ga_df)
 
