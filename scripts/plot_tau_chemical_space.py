@@ -555,6 +555,229 @@ def plot_tau_standalone_generations(coords_2d, labels, tau_arr, generations,
         _save_fig(fig, out_dir, f"tau_{tau_str}_generations", dpi)
 
 
+# ======================================================================
+# Mahalanobis / OOD panels
+# ======================================================================
+
+def load_mahal_data(mahal_csv, valid_smiles, labels, tau_arr):
+    """Load Mahalanobis CSV and match OOD_any + mean Mahal to UMAP molecules.
+
+    Returns:
+        ood_any : ndarray (n_points,)  — 0/1 for GA molecules, -1 for reference/top
+        mahal_mean : ndarray (n_points,) — mean Mahalanobis distance across models,
+                     NaN for reference/top
+    """
+    import re as _re
+    df = pd.read_csv(mahal_csv)
+
+    # Normalise SMILES column
+    if "CanonicalSMILES" in df.columns and "SMILES" not in df.columns:
+        df.rename(columns={"CanonicalSMILES": "SMILES"}, inplace=True)
+
+    # Build lookup: SMILES -> (OOD_any, mean_mahal)
+    mahal_cols = [c for c in df.columns if c.startswith("Mahal_")]
+    if not mahal_cols:
+        print("  WARNING: No Mahal_* columns found in mahal CSV")
+        n = len(valid_smiles)
+        return np.full(n, -1, dtype=int), np.full(n, np.nan)
+
+    df["_mean_mahal"] = df[mahal_cols].mean(axis=1)
+    ood_col = "OOD_any" if "OOD_any" in df.columns else None
+
+    lookup = {}
+    for _, row in df.iterrows():
+        smi = row.get("SMILES")
+        if isinstance(smi, str):
+            ood_val = int(row[ood_col]) if ood_col else 0
+            mean_m = row["_mean_mahal"]
+            lookup[smi] = (ood_val, mean_m)
+
+    n = len(valid_smiles)
+    ood_any = np.full(n, -1, dtype=int)
+    mahal_mean = np.full(n, np.nan)
+
+    matched = 0
+    for i, smi in enumerate(valid_smiles):
+        if labels[i] in ("reference", "top"):
+            continue
+        if smi in lookup:
+            ood_any[i], mahal_mean[i] = lookup[smi]
+            matched += 1
+
+    print(f"  Matched {matched} / {(labels == 'explored').sum()} explored molecules to Mahalanobis data")
+    return ood_any, mahal_mean
+
+
+def _draw_tau_mahal_panel(ax, coords_2d, labels, tau_arr, mahal_mean,
+                           tau_val, fig=None):
+    """Draw a Mahalanobis distance colorbar panel for a single tau value."""
+    ref_mask = labels == "reference"
+    tau_exp_mask = (labels == "explored") & (np.abs(tau_arr - tau_val) < 1e-6)
+    tau_top_mask = (labels == "top") & (np.abs(tau_arr - tau_val) < 1e-6)
+
+    ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
+               c="#EEEEEE", s=2, alpha=0.2, rasterized=True)
+
+    mahal_vals = mahal_mean[tau_exp_mask]
+    valid_mahal = mahal_vals[np.isfinite(mahal_vals)]
+    if len(valid_mahal) > 0:
+        vmin, vmax = np.percentile(valid_mahal, [2, 98])
+        sc = ax.scatter(coords_2d[tau_exp_mask, 0], coords_2d[tau_exp_mask, 1],
+                        c=mahal_vals, cmap="inferno", s=3, alpha=0.3,
+                        vmin=vmin, vmax=vmax, rasterized=True)
+        if fig is not None:
+            _add_side_colorbar(fig, ax, sc, "Mahalanobis Distance")
+
+    if tau_top_mask.sum() > 0:
+        ax.scatter(coords_2d[tau_top_mask, 0], coords_2d[tau_top_mask, 1],
+                   c="red", s=30, alpha=0.9, marker="*", zorder=5)
+
+    xlim, ylim = _robust_axis_limits(coords_2d)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
+def _draw_tau_ood_panel(ax, coords_2d, labels, tau_arr, ood_any, tau_val):
+    """Draw a binary OOD panel for a single tau value."""
+    ref_mask = labels == "reference"
+    tau_exp_mask = (labels == "explored") & (np.abs(tau_arr - tau_val) < 1e-6)
+    tau_top_mask = (labels == "top") & (np.abs(tau_arr - tau_val) < 1e-6)
+
+    ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
+               c="#EEEEEE", s=2, alpha=0.2, rasterized=True)
+
+    ood_vals = ood_any[tau_exp_mask]
+    exp_coords = coords_2d[tau_exp_mask]
+
+    in_mask = ood_vals == 0
+    out_mask = ood_vals == 1
+
+    if in_mask.sum() > 0:
+        ax.scatter(exp_coords[in_mask, 0], exp_coords[in_mask, 1],
+                   c="#2CA02C", s=3, alpha=0.2,
+                   label=f"In-domain ({in_mask.sum():,})", rasterized=True)
+    if out_mask.sum() > 0:
+        ax.scatter(exp_coords[out_mask, 0], exp_coords[out_mask, 1],
+                   c="#D64545", s=3, alpha=0.3,
+                   label=f"OOD ({out_mask.sum():,})", rasterized=True)
+
+    if tau_top_mask.sum() > 0:
+        ax.scatter(coords_2d[tau_top_mask, 0], coords_2d[tau_top_mask, 1],
+                   c="red", s=30, alpha=0.9, marker="*",
+                   label=f"Top {tau_top_mask.sum()}", zorder=5)
+
+    xlim, ylim = _robust_axis_limits(coords_2d)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.legend(fontsize=12, markerscale=2, frameon=False, loc="upper right")
+
+
+def plot_tau_mahal_grid(coords_2d, labels, tau_arr, mahal_mean,
+                         tau_values, out_dir, dpi=300):
+    """Side-by-side Mahalanobis distance colorbar panels, one per tau value."""
+    n_tau = len(tau_values)
+
+    if n_tau <= 4:
+        nrows, ncols = 1, n_tau
+    else:
+        ncols = 4
+        nrows = (n_tau + ncols - 1) // ncols
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 7 * nrows))
+
+    if n_tau == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
+        axes = axes.reshape(1, -1)
+    elif ncols == 1:
+        axes = axes.reshape(-1, 1)
+
+    panel_labels = [chr(ord("a") + i) for i in range(n_tau)]
+
+    for idx, tau_val in enumerate(tau_values):
+        row, col = divmod(idx, ncols)
+        ax = axes[row, col]
+        _draw_tau_mahal_panel(ax, coords_2d, labels, tau_arr,
+                               mahal_mean, tau_val, fig=fig)
+        ax.text(0.02, 0.98, f"({panel_labels[idx]})", transform=ax.transAxes,
+                fontsize=16, fontweight="bold", va="top", ha="left")
+
+    for idx in range(n_tau, nrows * ncols):
+        row, col = divmod(idx, ncols)
+        axes[row, col].set_visible(False)
+
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "tau_mahalanobis_grid", dpi)
+
+
+def plot_tau_ood_grid(coords_2d, labels, tau_arr, ood_any,
+                       tau_values, out_dir, dpi=300):
+    """Side-by-side binary OOD panels, one per tau value."""
+    n_tau = len(tau_values)
+
+    if n_tau <= 4:
+        nrows, ncols = 1, n_tau
+    else:
+        ncols = 4
+        nrows = (n_tau + ncols - 1) // ncols
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 7 * nrows))
+
+    if n_tau == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
+        axes = axes.reshape(1, -1)
+    elif ncols == 1:
+        axes = axes.reshape(-1, 1)
+
+    panel_labels = [chr(ord("a") + i) for i in range(n_tau)]
+
+    for idx, tau_val in enumerate(tau_values):
+        row, col = divmod(idx, ncols)
+        ax = axes[row, col]
+        _draw_tau_ood_panel(ax, coords_2d, labels, tau_arr, ood_any, tau_val)
+        _add_invisible_colorbar(fig, ax)
+        ax.text(0.02, 0.98, f"({panel_labels[idx]})", transform=ax.transAxes,
+                fontsize=16, fontweight="bold", va="top", ha="left")
+
+    for idx in range(n_tau, nrows * ncols):
+        row, col = divmod(idx, ncols)
+        axes[row, col].set_visible(False)
+
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "tau_ood_grid", dpi)
+
+
+def plot_tau_standalone_mahal(coords_2d, labels, tau_arr, mahal_mean,
+                               tau_values, out_dir, dpi=300):
+    """Individual standalone Mahalanobis distance panels per tau value."""
+    for tau_val in tau_values:
+        fig, ax = plt.subplots(figsize=PANEL_SIZE)
+        _draw_tau_mahal_panel(ax, coords_2d, labels, tau_arr,
+                               mahal_mean, tau_val, fig=fig)
+        fig.tight_layout()
+
+        tau_str = f"{tau_val:.2f}".replace(".", "")
+        _save_fig(fig, out_dir, f"tau_{tau_str}_mahalanobis", dpi)
+
+
+def plot_tau_standalone_ood(coords_2d, labels, tau_arr, ood_any,
+                             tau_values, out_dir, dpi=300):
+    """Individual standalone OOD panels per tau value."""
+    for tau_val in tau_values:
+        fig, ax = plt.subplots(figsize=PANEL_SIZE)
+        _draw_tau_ood_panel(ax, coords_2d, labels, tau_arr, ood_any, tau_val)
+        _add_invisible_colorbar(fig, ax)
+        fig.tight_layout()
+
+        tau_str = f"{tau_val:.2f}".replace(".", "")
+        _save_fig(fig, out_dir, f"tau_{tau_str}_ood", dpi)
+
+
 def print_coverage_stats_per_tau(coords_2d, labels, tau_arr, tau_values):
     """Print grid-based coverage statistics per tau value."""
     ref_mask = labels == "reference"
@@ -618,6 +841,9 @@ def main():
                         help="Path to .npz UMAP cache")
     parser.add_argument("--no_cache", action="store_true",
                         help="Force recomputation of UMAP")
+    parser.add_argument("--mahal_csv", type=str, default=None,
+                        help="Path to Mahalanobis-augmented CSV (from compute_mahalanobis.py). "
+                             "Enables OOD panels.")
     parser.add_argument("--dpi", type=int, default=300,
                         help="DPI for PNG output (default: 300)")
     args = parser.parse_args()
@@ -696,6 +922,31 @@ def main():
         plot_tau_standalone_fitness(coords_2d, labels, tau_arr, fitness,
                                     tau_values, args.out_dir, dpi=args.dpi)
 
+        # OOD panels (if Mahalanobis CSV provided)
+        if args.mahal_csv is not None:
+            if not os.path.exists(args.mahal_csv):
+                print(f"\n  WARNING: {args.mahal_csv} not found, skipping OOD panels")
+            else:
+                print(f"\n  --- Loading Mahalanobis data from {args.mahal_csv} ---")
+                ood_any, mahal_mean = load_mahal_data(
+                    args.mahal_csv, valid_smiles, labels, tau_arr)
+
+                print("\n  --- Tau Mahalanobis distance grid ---")
+                plot_tau_mahal_grid(coords_2d, labels, tau_arr, mahal_mean,
+                                     tau_values, args.out_dir, dpi=args.dpi)
+
+                print("\n  --- Tau OOD grid ---")
+                plot_tau_ood_grid(coords_2d, labels, tau_arr, ood_any,
+                                   tau_values, args.out_dir, dpi=args.dpi)
+
+                print("\n  --- Standalone Mahalanobis panels ---")
+                plot_tau_standalone_mahal(coords_2d, labels, tau_arr, mahal_mean,
+                                           tau_values, args.out_dir, dpi=args.dpi)
+
+                print("\n  --- Standalone OOD panels ---")
+                plot_tau_standalone_ood(coords_2d, labels, tau_arr, ood_any,
+                                         tau_values, args.out_dir, dpi=args.dpi)
+
         print_coverage_stats_per_tau(coords_2d, labels, tau_arr, tau_values)
         return
 
@@ -767,6 +1018,31 @@ def main():
     print("\n  --- Standalone fitness panels ---")
     plot_tau_standalone_fitness(coords_2d, labels, tau_arr, fitness,
                                 tau_values, args.out_dir, dpi=args.dpi)
+
+    # OOD panels (if Mahalanobis CSV provided)
+    if args.mahal_csv is not None:
+        if not os.path.exists(args.mahal_csv):
+            print(f"\n  WARNING: {args.mahal_csv} not found, skipping OOD panels")
+        else:
+            print(f"\n  --- Loading Mahalanobis data from {args.mahal_csv} ---")
+            ood_any, mahal_mean = load_mahal_data(
+                args.mahal_csv, valid_smiles, labels, tau_arr)
+
+            print("\n  --- Tau Mahalanobis distance grid ---")
+            plot_tau_mahal_grid(coords_2d, labels, tau_arr, mahal_mean,
+                                 tau_values, args.out_dir, dpi=args.dpi)
+
+            print("\n  --- Tau OOD grid ---")
+            plot_tau_ood_grid(coords_2d, labels, tau_arr, ood_any,
+                               tau_values, args.out_dir, dpi=args.dpi)
+
+            print("\n  --- Standalone Mahalanobis panels ---")
+            plot_tau_standalone_mahal(coords_2d, labels, tau_arr, mahal_mean,
+                                       tau_values, args.out_dir, dpi=args.dpi)
+
+            print("\n  --- Standalone OOD panels ---")
+            plot_tau_standalone_ood(coords_2d, labels, tau_arr, ood_any,
+                                     tau_values, args.out_dir, dpi=args.dpi)
 
     # ==================================================================
     # 5. Coverage statistics

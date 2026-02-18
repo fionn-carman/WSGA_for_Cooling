@@ -800,6 +800,133 @@ def plot_panel_validity(coords_2d, labels, is_valid, out_dir, dpi=300):
     _save_fig(fig, out_dir, "panel_validity", dpi)
 
 
+# ======================================================================
+# Mahalanobis / OOD panels
+# ======================================================================
+
+def load_mahal_data_single(mahal_csv, valid_smiles, labels):
+    """Load Mahalanobis CSV and match OOD_any + mean Mahal to UMAP molecules.
+
+    Returns:
+        ood_any : ndarray (n_points,) — 0/1 for GA molecules, -1 for reference/top
+        mahal_mean : ndarray (n_points,) — mean Mahalanobis distance across models,
+                     NaN for reference/top
+    """
+    df = pd.read_csv(mahal_csv)
+
+    if "CanonicalSMILES" in df.columns and "SMILES" not in df.columns:
+        df.rename(columns={"CanonicalSMILES": "SMILES"}, inplace=True)
+
+    mahal_cols = [c for c in df.columns if c.startswith("Mahal_")]
+    if not mahal_cols:
+        print("  WARNING: No Mahal_* columns found in mahal CSV")
+        n = len(valid_smiles)
+        return np.full(n, -1, dtype=int), np.full(n, np.nan)
+
+    df["_mean_mahal"] = df[mahal_cols].mean(axis=1)
+    ood_col = "OOD_any" if "OOD_any" in df.columns else None
+
+    lookup = {}
+    for _, row in df.iterrows():
+        smi = row.get("SMILES")
+        if isinstance(smi, str):
+            ood_val = int(row[ood_col]) if ood_col else 0
+            mean_m = row["_mean_mahal"]
+            lookup[smi] = (ood_val, mean_m)
+
+    n = len(valid_smiles)
+    ood_any = np.full(n, -1, dtype=int)
+    mahal_mean = np.full(n, np.nan)
+
+    matched = 0
+    for i, smi in enumerate(valid_smiles):
+        if labels[i] in ("reference", "top"):
+            continue
+        if smi in lookup:
+            ood_any[i], mahal_mean[i] = lookup[smi]
+            matched += 1
+
+    print(f"  Matched {matched} / {(labels == 'explored').sum()} explored molecules to Mahalanobis data")
+    return ood_any, mahal_mean
+
+
+def _draw_panel_mahal(ax, coords_2d, labels, mahal_mean, fig=None):
+    """Panel: Mahalanobis distance continuous colorbar."""
+    ref_mask = labels == "reference"
+    exp_mask = labels == "explored"
+    top_mask = labels == "top"
+
+    ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
+               c="#EEEEEE", s=2, alpha=0.2, rasterized=True)
+
+    mahal_vals = mahal_mean[exp_mask]
+    valid_mahal = mahal_vals[np.isfinite(mahal_vals)]
+    if len(valid_mahal) > 0:
+        vmin, vmax = np.percentile(valid_mahal, [2, 98])
+        sc = ax.scatter(coords_2d[exp_mask, 0], coords_2d[exp_mask, 1],
+                        c=mahal_vals, cmap="inferno", s=3, alpha=0.3,
+                        vmin=vmin, vmax=vmax, rasterized=True)
+        if fig is not None:
+            _add_side_colorbar(fig, ax, sc, "Mahalanobis Distance")
+
+    ax.scatter(coords_2d[top_mask, 0], coords_2d[top_mask, 1],
+               c="red", s=30, alpha=0.9, marker="*", zorder=5)
+
+    _apply_axis_limits(ax, coords_2d)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
+def _draw_panel_ood(ax, coords_2d, labels, ood_any):
+    """Panel: binary OOD (in-domain=green, OOD=red)."""
+    ref_mask = labels == "reference"
+    exp_mask = labels == "explored"
+    top_mask = labels == "top"
+
+    ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
+               c="#EEEEEE", s=2, alpha=0.2, rasterized=True)
+
+    ood_vals = ood_any[exp_mask]
+    exp_coords = coords_2d[exp_mask]
+
+    in_mask = ood_vals == 0
+    out_mask = ood_vals == 1
+
+    if in_mask.sum() > 0:
+        ax.scatter(exp_coords[in_mask, 0], exp_coords[in_mask, 1],
+                   c="#2CA02C", s=3, alpha=0.2,
+                   label=f"In-domain ({in_mask.sum():,})", rasterized=True)
+    if out_mask.sum() > 0:
+        ax.scatter(exp_coords[out_mask, 0], exp_coords[out_mask, 1],
+                   c="#D64545", s=3, alpha=0.3,
+                   label=f"OOD ({out_mask.sum():,})", rasterized=True)
+
+    ax.scatter(coords_2d[top_mask, 0], coords_2d[top_mask, 1],
+               c="red", s=30, alpha=0.9, marker="*", label="Top 50", zorder=5)
+
+    ax.legend(fontsize=12, markerscale=2, frameon=False, loc="upper right")
+    _apply_axis_limits(ax, coords_2d)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
+def plot_panel_mahal(coords_2d, labels, mahal_mean, out_dir, dpi=300):
+    """Standalone Mahalanobis distance panel."""
+    fig, ax = plt.subplots(figsize=PANEL_SIZE)
+    _draw_panel_mahal(ax, coords_2d, labels, mahal_mean, fig=fig)
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "panel_mahalanobis", dpi)
+
+
+def plot_panel_ood(coords_2d, labels, ood_any, out_dir, dpi=300):
+    """Standalone binary OOD panel."""
+    fig, ax = plt.subplots(figsize=PANEL_SIZE)
+    _draw_panel_ood(ax, coords_2d, labels, ood_any)
+    _add_invisible_colorbar(fig, ax)
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "panel_ood", dpi)
+
+
 def plot_panel_b(coords_2d, labels, out_dir, dpi=300):
     """Standalone panel (b): Coverage overlay."""
     fig, ax = plt.subplots(figsize=PANEL_SIZE)
@@ -1029,7 +1156,7 @@ def print_coverage_stats(coords_2d, labels, ga_df):
 
 def _generate_all_figures(coords_2d, labels, generations, fitness, is_valid,
                           valid_smiles, ga_df, out_dir, dominant_fgs=None,
-                          dpi=300):
+                          mahal_csv=None, dpi=300):
     """Generate all figures from pre-computed UMAP data."""
     print(f"\n{'='*60}")
     print("  Generating figures")
@@ -1073,6 +1200,21 @@ def _generate_all_figures(coords_2d, labels, generations, fitness, is_valid,
     else:
         print("\n  Skipping FG-over-generations (no GA dataframe available)")
 
+    # Mahalanobis / OOD panels
+    if mahal_csv is not None:
+        if not os.path.exists(mahal_csv):
+            print(f"\n  WARNING: {mahal_csv} not found, skipping OOD panels")
+        else:
+            print(f"\n  --- Loading Mahalanobis data from {mahal_csv} ---")
+            ood_any, mahal_mean = load_mahal_data_single(
+                mahal_csv, valid_smiles, labels)
+
+            print("\n  --- Mahalanobis distance ---")
+            plot_panel_mahal(coords_2d, labels, mahal_mean, out_dir, dpi=dpi)
+
+            print("\n  --- OOD classification ---")
+            plot_panel_ood(coords_2d, labels, ood_any, out_dir, dpi=dpi)
+
 
 # ======================================================================
 # Main
@@ -1102,6 +1244,9 @@ def main():
                         help="Force recomputation of UMAP even if cache exists")
     parser.add_argument("--ga_csv", type=str, default=None,
                         help="Path to GA molecules CSV (for --npz mode FG-over-gen plot)")
+    parser.add_argument("--mahal_csv", type=str, default=None,
+                        help="Path to Mahalanobis-augmented CSV (from compute_mahalanobis.py). "
+                             "Enables OOD panels.")
     parser.add_argument("--dpi", type=int, default=300,
                         help="DPI for PNG output (default: 300)")
     args = parser.parse_args()
@@ -1188,7 +1333,8 @@ def main():
 
         _generate_all_figures(coords_2d, labels, generations, fitness, is_valid,
                               valid_smiles, ga_df, args.out_dir,
-                              dominant_fgs=dominant_fgs, dpi=args.dpi)
+                              dominant_fgs=dominant_fgs,
+                              mahal_csv=args.mahal_csv, dpi=args.dpi)
         return
 
     # ------------------------------------------------------------------
@@ -1252,7 +1398,8 @@ def main():
     # ==================================================================
     _generate_all_figures(coords_2d, labels, generations, fitness, is_valid,
                           valid_smiles, ga_df, args.out_dir,
-                          dominant_fgs=dominant_fgs, dpi=args.dpi)
+                          dominant_fgs=dominant_fgs,
+                          mahal_csv=args.mahal_csv, dpi=args.dpi)
 
     print_coverage_stats(coords_2d, labels, ga_df)
 
