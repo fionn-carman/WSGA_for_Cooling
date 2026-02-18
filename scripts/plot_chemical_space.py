@@ -487,6 +487,7 @@ def _draw_panel_a(ax, ref_coords, dominant_labels, label_counts, label_to_colour
                    label=f"{lab} ({mask.sum()})", rasterized=True)
 
     ax.set_title("Reference Population — Functional Groups", fontsize=12)
+    _apply_axis_limits(ax, ref_coords)
     ax.set_xticks([])
     ax.set_yticks([])
 
@@ -510,15 +511,43 @@ def _draw_panel_b(ax, coords_2d, labels):
 
     ax.set_title("Chemical Space Coverage", fontsize=12)
     ax.legend(fontsize=8, markerscale=2, frameon=False, loc="upper right")
+    _apply_axis_limits(ax, coords_2d)
     ax.set_xticks([])
     ax.set_yticks([])
 
 
+def _robust_axis_limits(coords_2d, margin=0.03, percentile=0.5):
+    """Compute axis limits that exclude extreme outliers.
+
+    Uses the given percentile to trim outliers from each side, then adds
+    a margin (fraction of the trimmed range) for padding.
+    """
+    lo, hi = percentile, 100 - percentile
+    xmin, xmax = np.percentile(coords_2d[:, 0], [lo, hi])
+    ymin, ymax = np.percentile(coords_2d[:, 1], [lo, hi])
+    x_pad = (xmax - xmin) * margin
+    y_pad = (ymax - ymin) * margin
+    return (xmin - x_pad, xmax + x_pad), (ymin - y_pad, ymax + y_pad)
+
+
+def _apply_axis_limits(ax, coords_2d):
+    """Set axis limits that trim outlier whitespace."""
+    xlim, ylim = _robust_axis_limits(coords_2d)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+
+
+_CBAR_FRACTION = 0.046
+_CBAR_PAD = 0.02
+_CBAR_SHRINK = 0.85
+
+
 def _add_side_colorbar(fig, ax, mappable, label):
     """Add a vertical colorbar to the right of the axes."""
-    cbar = fig.colorbar(mappable, ax=ax, fraction=0.046, pad=0.02, shrink=0.6)
-    cbar.set_label(label, fontsize=9)
-    cbar.ax.tick_params(labelsize=8)
+    cbar = fig.colorbar(mappable, ax=ax, fraction=_CBAR_FRACTION,
+                        pad=_CBAR_PAD, shrink=_CBAR_SHRINK)
+    cbar.set_label(label, fontsize=10)
+    cbar.ax.tick_params(labelsize=9)
     return cbar
 
 
@@ -526,7 +555,8 @@ def _add_invisible_colorbar(fig, ax):
     """Add an invisible colorbar spacer so the axes width matches panels with colorbars."""
     sm = plt.cm.ScalarMappable(cmap="viridis", norm=mcolors.Normalize(0, 1))
     sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.02, shrink=0.6)
+    cbar = fig.colorbar(sm, ax=ax, fraction=_CBAR_FRACTION,
+                        pad=_CBAR_PAD, shrink=_CBAR_SHRINK)
     cbar.ax.set_visible(False)
 
 
@@ -550,6 +580,7 @@ def _draw_panel_c(ax, coords_2d, labels, generations, fig=None):
                c="red", s=30, alpha=0.9, marker="*", zorder=5)
 
     ax.set_title("Exploration Over Time", fontsize=12)
+    _apply_axis_limits(ax, coords_2d)
     ax.set_xticks([])
     ax.set_yticks([])
 
@@ -577,6 +608,7 @@ def _draw_panel_d(ax, coords_2d, labels, fitness, fig=None):
                c="red", s=30, alpha=0.9, marker="*", zorder=5)
 
     ax.set_title("Fitness Landscape", fontsize=12)
+    _apply_axis_limits(ax, coords_2d)
     ax.set_xticks([])
     ax.set_yticks([])
 
