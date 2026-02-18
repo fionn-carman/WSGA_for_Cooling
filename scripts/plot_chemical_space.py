@@ -35,7 +35,7 @@ from collections import Counter
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+import matplotlib.colors as mcolors
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -514,26 +514,23 @@ def _draw_panel_b(ax, coords_2d, labels):
     ax.set_yticks([])
 
 
-def _add_inset_colorbar(ax, mappable, label, width="3%", height="40%", loc="lower right"):
-    """Add a colorbar inside the axes using an inset_axes."""
-    # loc string to bbox_to_anchor + position
-    pos_map = {
-        "lower right": (0.98, 0.02, 0, 0),
-        "upper right": (0.98, 0.98, 0, 0),
-    }
-    bx, by, _, _ = pos_map.get(loc, (0.98, 0.02, 0, 0))
-    cax = inset_axes(ax, width=width, height=height,
-                     loc="lower left",
-                     bbox_to_anchor=(bx - 0.05, by if "lower" in loc else by - 0.45, 0.05, 0.45),
-                     bbox_transform=ax.transAxes,
-                     borderpad=0)
-    cbar = plt.colorbar(mappable, cax=cax)
-    cbar.set_label(label, fontsize=8)
-    cbar.ax.tick_params(labelsize=7)
+def _add_side_colorbar(fig, ax, mappable, label):
+    """Add a vertical colorbar to the right of the axes."""
+    cbar = fig.colorbar(mappable, ax=ax, fraction=0.046, pad=0.02, shrink=0.6)
+    cbar.set_label(label, fontsize=9)
+    cbar.ax.tick_params(labelsize=8)
     return cbar
 
 
-def _draw_panel_c(ax, coords_2d, labels, generations):
+def _add_invisible_colorbar(fig, ax):
+    """Add an invisible colorbar spacer so the axes width matches panels with colorbars."""
+    sm = plt.cm.ScalarMappable(cmap="viridis", norm=mcolors.Normalize(0, 1))
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.02, shrink=0.6)
+    cbar.ax.set_visible(False)
+
+
+def _draw_panel_c(ax, coords_2d, labels, generations, fig=None):
     """Panel (c): Exploration over time (generation colourmap)."""
     ref_mask = labels == "reference"
     exp_mask = labels == "explored"
@@ -546,7 +543,8 @@ def _draw_panel_c(ax, coords_2d, labels, generations):
     if len(gen_vals) > 0:
         sc = ax.scatter(coords_2d[exp_mask, 0], coords_2d[exp_mask, 1],
                         c=gen_vals, cmap="plasma", s=3, alpha=0.3, rasterized=True)
-        _add_inset_colorbar(ax, sc, "Generation")
+        if fig is not None:
+            _add_side_colorbar(fig, ax, sc, "Generation")
 
     ax.scatter(coords_2d[top_mask, 0], coords_2d[top_mask, 1],
                c="red", s=30, alpha=0.9, marker="*", zorder=5)
@@ -556,7 +554,7 @@ def _draw_panel_c(ax, coords_2d, labels, generations):
     ax.set_yticks([])
 
 
-def _draw_panel_d(ax, coords_2d, labels, fitness):
+def _draw_panel_d(ax, coords_2d, labels, fitness, fig=None):
     """Panel (d): FOM1 fitness landscape."""
     ref_mask = labels == "reference"
     exp_mask = labels == "explored"
@@ -572,7 +570,8 @@ def _draw_panel_d(ax, coords_2d, labels, fitness):
         sc = ax.scatter(coords_2d[exp_mask, 0], coords_2d[exp_mask, 1],
                         c=fit_vals, cmap="viridis", s=3, alpha=0.3,
                         vmin=vmin, vmax=vmax, rasterized=True)
-        _add_inset_colorbar(ax, sc, "FOM1 (avg)")
+        if fig is not None:
+            _add_side_colorbar(fig, ax, sc, "FOM1 (avg)")
 
     ax.scatter(coords_2d[top_mask, 0], coords_2d[top_mask, 1],
                c="red", s=30, alpha=0.9, marker="*", zorder=5)
@@ -679,7 +678,7 @@ def plot_panel_b(coords_2d, labels, out_dir, dpi=300):
 def plot_panel_c(coords_2d, labels, generations, out_dir, dpi=300):
     """Standalone panel (c): Exploration over time."""
     fig, ax = plt.subplots(figsize=PANEL_SIZE)
-    _draw_panel_c(ax, coords_2d, labels, generations)
+    _draw_panel_c(ax, coords_2d, labels, generations, fig=fig)
     fig.tight_layout()
     _save_fig(fig, out_dir, "panel_c_generations", dpi)
 
@@ -687,7 +686,7 @@ def plot_panel_c(coords_2d, labels, generations, out_dir, dpi=300):
 def plot_panel_d(coords_2d, labels, fitness, out_dir, dpi=300):
     """Standalone panel (d): Fitness landscape."""
     fig, ax = plt.subplots(figsize=PANEL_SIZE)
-    _draw_panel_d(ax, coords_2d, labels, fitness)
+    _draw_panel_d(ax, coords_2d, labels, fitness, fig=fig)
     fig.tight_layout()
     _save_fig(fig, out_dir, "panel_d_fitness", dpi)
 
@@ -698,8 +697,9 @@ def plot_combined_grid(coords_2d, labels, generations, fitness,
     fig, axes = plt.subplots(1, 3, figsize=(21, 7))
 
     _draw_panel_b(axes[0], coords_2d, labels)
-    _draw_panel_c(axes[1], coords_2d, labels, generations)
-    _draw_panel_d(axes[2], coords_2d, labels, fitness)
+    _add_invisible_colorbar(fig, axes[0])   # spacer so width matches (b)/(c)
+    _draw_panel_c(axes[1], coords_2d, labels, generations, fig=fig)
+    _draw_panel_d(axes[2], coords_2d, labels, fitness, fig=fig)
 
     # Panel labels
     for ax, label in zip(axes, ["(a)", "(b)", "(c)"]):
