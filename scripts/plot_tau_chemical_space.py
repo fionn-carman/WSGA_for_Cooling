@@ -10,6 +10,8 @@ The shared embedding ensures panels are directly comparable across tau values.
 Figures produced:
   (grid)       NxM coverage grid — one panel per tau value
   (standalone) Individual coverage panels per tau (with invisible colorbars)
+  (per-model)  Per-property 2x1 grids: Mahalanobis distance + binary OOD
+               for each of the 12 regression models, per tau value
 
 Requirements:
     pip install umap-learn rdkit-pypi tqdm
@@ -74,6 +76,40 @@ from plot_chemical_space import (
     _robust_axis_limits, _add_invisible_colorbar, _add_side_colorbar,
     PANEL_SIZE,
 )
+
+
+# ======================================================================
+# Per-model constants
+# ======================================================================
+
+REGRESSION_TARGETS = [
+    "BP-Measured", "DC_exp", "Density_100C_g_cm^3", "Density_40C_g_cm^3",
+    "flashpoint", "Heat_Capacity_Constant_Pressure_100C_J_K_Mol",
+    "Heat_Capacity_Constant_Pressure_40C_J_K_Mol",
+    "Kinematic_Viscosity_40C", "Kinematic_Viscosity_100C",
+    "MP-Measured", "Thermal_Conductivity_100C", "Thermal_Conductivity_40C",
+]
+
+# Human-readable short names for plot titles
+MODEL_DISPLAY_NAMES = {
+    "BP-Measured": "Boiling Point",
+    "DC_exp": "Dielectric Constant",
+    "Density_100C_g_cm^3": "Density (100\u00b0C)",
+    "Density_40C_g_cm^3": "Density (40\u00b0C)",
+    "flashpoint": "Flash Point",
+    "Heat_Capacity_Constant_Pressure_100C_J_K_Mol": "Heat Capacity (100\u00b0C)",
+    "Heat_Capacity_Constant_Pressure_40C_J_K_Mol": "Heat Capacity (40\u00b0C)",
+    "Kinematic_Viscosity_40C": "Kinematic Viscosity (40\u00b0C)",
+    "Kinematic_Viscosity_100C": "Kinematic Viscosity (100\u00b0C)",
+    "MP-Measured": "Melting Point",
+    "Thermal_Conductivity_100C": "Thermal Conductivity (100\u00b0C)",
+    "Thermal_Conductivity_40C": "Thermal Conductivity (40\u00b0C)",
+}
+
+
+def _sanitise_target(target):
+    """Sanitise target name the same way as compute_mahalanobis.py."""
+    return target.replace("^", "").replace("/", "_")
 
 
 # ======================================================================
@@ -608,6 +644,63 @@ def load_mahal_data(mahal_csv, valid_smiles, labels, tau_arr):
     return ood_any, mahal_mean
 
 
+def load_mahal_per_model(mahal_csv, valid_smiles, labels, tau_arr):
+    """Load per-model Mahalanobis distances and OOD flags from mahal CSV.
+
+    Returns:
+        per_model : dict  — keys are target names, values are dicts with:
+            'mahal': ndarray (n_points,) — Mahalanobis distance, NaN for ref/top
+            'ood':   ndarray (n_points,) — 0/1 for GA molecules, -1 for ref/top
+            'display_name': str — human-readable property name
+    """
+    df = pd.read_csv(mahal_csv)
+
+    # Normalise SMILES column
+    if "CanonicalSMILES" in df.columns and "SMILES" not in df.columns:
+        df.rename(columns={"CanonicalSMILES": "SMILES"}, inplace=True)
+
+    # Build SMILES -> row index lookup
+    smi_to_idx = {}
+    for i, row in df.iterrows():
+        smi = row.get("SMILES")
+        if isinstance(smi, str):
+            smi_to_idx[smi] = i
+
+    n = len(valid_smiles)
+    per_model = {}
+    found_targets = []
+
+    for target in REGRESSION_TARGETS:
+        col_safe = _sanitise_target(target)
+        mahal_col = f"Mahal_{col_safe}"
+        ood_col = f"OOD_{col_safe}"
+
+        if mahal_col not in df.columns:
+            continue
+
+        found_targets.append(target)
+        mahal_arr = np.full(n, np.nan)
+        ood_arr = np.full(n, -1, dtype=int)
+
+        for i, smi in enumerate(valid_smiles):
+            if labels[i] in ("reference", "top"):
+                continue
+            if smi in smi_to_idx:
+                row_idx = smi_to_idx[smi]
+                mahal_arr[i] = df.at[row_idx, mahal_col]
+                if ood_col in df.columns:
+                    ood_arr[i] = int(df.at[row_idx, ood_col])
+
+        per_model[target] = {
+            "mahal": mahal_arr,
+            "ood": ood_arr,
+            "display_name": MODEL_DISPLAY_NAMES.get(target, target),
+        }
+
+    print(f"  Loaded per-model Mahalanobis data for {len(found_targets)} / {len(REGRESSION_TARGETS)} models")
+    return per_model
+
+
 def _draw_tau_mahal_panel(ax, coords_2d, labels, tau_arr, mahal_mean,
                            tau_val, fig=None):
     """Draw a Mahalanobis distance colorbar panel for a single tau value."""
@@ -776,6 +869,131 @@ def plot_tau_standalone_ood(coords_2d, labels, tau_arr, ood_any,
 
         tau_str = f"{tau_val:.2f}".replace(".", "")
         _save_fig(fig, out_dir, f"tau_{tau_str}_ood", dpi)
+
+
+# ======================================================================
+# Per-model OOD figures (2x1 grids: Mahalanobis + binary OOD)
+# ======================================================================
+
+def plot_per_model_ood_figures(coords_2d, labels, tau_arr, per_model,
+                               tau_values, out_dir, dpi=300):
+    """Generate per-model 2x1 grids (Mahalanobis distance | binary OOD).
+
+    For each tau value and each of the 12 regression models, produces
+    a 2x1 figure:
+      Left:  Mahalanobis distance coloured by magnitude
+      Right: Binary in-domain / OOD classification
+
+    Output files: tau_{tau}_model_{model}_ood.png
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    for tau_val in tau_values:
+        tau_str = f"{tau_val:.2f}".replace(".", "")
+
+        for target, mdata in per_model.items():
+            col_safe = _sanitise_target(target)
+            display_name = mdata["display_name"]
+            mahal_arr = mdata["mahal"]
+            ood_arr = mdata["ood"]
+
+            fig, (ax_mahal, ax_ood) = plt.subplots(
+                1, 2, figsize=(PANEL_SIZE[0] * 2 + 1, PANEL_SIZE[1])
+            )
+
+            # --- Left panel: Mahalanobis distance ---
+            _draw_per_model_mahal_panel(
+                ax_mahal, coords_2d, labels, tau_arr, mahal_arr,
+                tau_val, display_name, fig=fig,
+            )
+
+            # --- Right panel: binary OOD ---
+            _draw_per_model_ood_panel(
+                ax_ood, coords_2d, labels, tau_arr, ood_arr,
+                tau_val, display_name,
+            )
+            _add_invisible_colorbar(fig, ax_ood)
+
+            fig.suptitle(f"{display_name} — \u03c4 = {tau_val}",
+                         fontsize=16, fontweight="bold", y=1.02)
+            fig.tight_layout()
+
+            fname = f"tau_{tau_str}_model_{col_safe}_ood"
+            _save_fig(fig, out_dir, fname, dpi)
+
+    n_figs = len(tau_values) * len(per_model)
+    print(f"  Saved {n_figs} per-model OOD figures to {out_dir}/")
+
+
+def _draw_per_model_mahal_panel(ax, coords_2d, labels, tau_arr, mahal_arr,
+                                 tau_val, display_name, fig=None):
+    """Left panel of per-model 2x1: Mahalanobis distance colormap."""
+    ref_mask = labels == "reference"
+    tau_exp_mask = (labels == "explored") & (np.abs(tau_arr - tau_val) < 1e-6)
+    tau_top_mask = (labels == "top") & (np.abs(tau_arr - tau_val) < 1e-6)
+
+    ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
+               c="#EEEEEE", s=2, alpha=0.2, rasterized=True)
+
+    mahal_vals = mahal_arr[tau_exp_mask]
+    valid_mahal = mahal_vals[np.isfinite(mahal_vals)]
+    if len(valid_mahal) > 0:
+        vmin, vmax = np.percentile(valid_mahal, [2, 98])
+        sc = ax.scatter(coords_2d[tau_exp_mask, 0], coords_2d[tau_exp_mask, 1],
+                        c=mahal_vals, cmap="inferno", s=3, alpha=0.3,
+                        vmin=vmin, vmax=vmax, rasterized=True)
+        if fig is not None:
+            _add_side_colorbar(fig, ax, sc, "Mahalanobis Distance")
+
+    if tau_top_mask.sum() > 0:
+        ax.scatter(coords_2d[tau_top_mask, 0], coords_2d[tau_top_mask, 1],
+                   c="red", s=30, alpha=0.9, marker="*", zorder=5)
+
+    xlim, ylim = _robust_axis_limits(coords_2d)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_title(f"Mahalanobis Distance", fontsize=13)
+
+
+def _draw_per_model_ood_panel(ax, coords_2d, labels, tau_arr, ood_arr,
+                                tau_val, display_name):
+    """Right panel of per-model 2x1: binary in-domain / OOD."""
+    ref_mask = labels == "reference"
+    tau_exp_mask = (labels == "explored") & (np.abs(tau_arr - tau_val) < 1e-6)
+    tau_top_mask = (labels == "top") & (np.abs(tau_arr - tau_val) < 1e-6)
+
+    ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
+               c="#EEEEEE", s=2, alpha=0.2, rasterized=True)
+
+    ood_vals = ood_arr[tau_exp_mask]
+    exp_coords = coords_2d[tau_exp_mask]
+
+    in_mask = ood_vals == 0
+    out_mask = ood_vals == 1
+
+    if in_mask.sum() > 0:
+        ax.scatter(exp_coords[in_mask, 0], exp_coords[in_mask, 1],
+                   c="#2CA02C", s=3, alpha=0.2,
+                   label=f"In-domain ({in_mask.sum():,})", rasterized=True)
+    if out_mask.sum() > 0:
+        ax.scatter(exp_coords[out_mask, 0], exp_coords[out_mask, 1],
+                   c="#D64545", s=3, alpha=0.3,
+                   label=f"OOD ({out_mask.sum():,})", rasterized=True)
+
+    if tau_top_mask.sum() > 0:
+        ax.scatter(coords_2d[tau_top_mask, 0], coords_2d[tau_top_mask, 1],
+                   c="red", s=30, alpha=0.9, marker="*",
+                   label=f"Top {tau_top_mask.sum()}", zorder=5)
+
+    xlim, ylim = _robust_axis_limits(coords_2d)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_title(f"OOD Classification", fontsize=13)
+    ax.legend(fontsize=11, markerscale=2, frameon=False, loc="upper right")
 
 
 def print_coverage_stats_per_tau(coords_2d, labels, tau_arr, tau_values):
@@ -947,6 +1165,17 @@ def main():
                 plot_tau_standalone_ood(coords_2d, labels, tau_arr, ood_any,
                                          tau_values, args.out_dir, dpi=args.dpi)
 
+                # Per-model OOD figures (12 x 2x1 grids per tau)
+                print(f"\n  --- Loading per-model Mahalanobis data ---")
+                per_model = load_mahal_per_model(
+                    args.mahal_csv, valid_smiles, labels, tau_arr)
+                if per_model:
+                    per_model_dir = os.path.join(args.out_dir, "per_model_ood")
+                    print(f"\n  --- Per-model OOD figures ({len(per_model)} models x {len(tau_values)} tau) ---")
+                    plot_per_model_ood_figures(
+                        coords_2d, labels, tau_arr, per_model,
+                        tau_values, per_model_dir, dpi=args.dpi)
+
         print_coverage_stats_per_tau(coords_2d, labels, tau_arr, tau_values)
         return
 
@@ -1043,6 +1272,17 @@ def main():
             print("\n  --- Standalone OOD panels ---")
             plot_tau_standalone_ood(coords_2d, labels, tau_arr, ood_any,
                                      tau_values, args.out_dir, dpi=args.dpi)
+
+            # Per-model OOD figures (12 x 2x1 grids per tau)
+            print(f"\n  --- Loading per-model Mahalanobis data ---")
+            per_model = load_mahal_per_model(
+                args.mahal_csv, valid_smiles, labels, tau_arr)
+            if per_model:
+                per_model_dir = os.path.join(args.out_dir, "per_model_ood")
+                print(f"\n  --- Per-model OOD figures ({len(per_model)} models x {len(tau_values)} tau) ---")
+                plot_per_model_ood_figures(
+                    coords_2d, labels, tau_arr, per_model,
+                    tau_values, per_model_dir, dpi=args.dpi)
 
     # ==================================================================
     # 5. Coverage statistics
