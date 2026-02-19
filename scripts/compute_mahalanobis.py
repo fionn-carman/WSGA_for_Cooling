@@ -43,6 +43,8 @@ except ImportError:
 
 from scipy.stats import chi2
 from sklearn.covariance import LedoitWolf
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 
 # Add src/ to path for descriptor imports
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -102,15 +104,18 @@ def load_rfe_features(models_dir, target):
 
 
 def compute_mahal_for_model(eval_desc_df, training_dir, models_dir,
-                            target, threshold_pct=0.975):
+                            target, threshold_pct=0.975,
+                            pca_variance=0.95, max_feat_ratio=20):
     """Compute Mahalanobis distance for evaluated molecules against one model.
 
-    Uses Ledoit-Wolf shrinkage for robust covariance estimation (critical
-    when n_features is a sizeable fraction of n_training_samples).
-
-    The OOD threshold is set as the empirical percentile of the training
-    set's own D_M^2 distribution rather than a chi-squared approximation,
-    which assumes multivariate normality that RDKit descriptors violate.
+    Pipeline:
+      1. Load RFE features and training data
+      2. Standardise (z-score) using training statistics
+      3. PCA to retain components explaining pca_variance of training variance
+         (avoids ill-conditioned covariance from too many correlated features)
+      4. Ledoit-Wolf covariance in PCA space
+      5. Mahalanobis distance in PCA space
+      6. OOD threshold from empirical 97.5th percentile of training D_M^2
 
     Parameters
     ----------
@@ -124,6 +129,11 @@ def compute_mahal_for_model(eval_desc_df, training_dir, models_dir,
         Model/property name.
     threshold_pct : float
         Percentile for OOD threshold (default 0.975).
+    pca_variance : float
+        Fraction of training variance to retain in PCA (default 0.95).
+    max_feat_ratio : int
+        Maximum ratio of n_train / n_components to ensure stable covariance
+        (default 20). If PCA gives more components, truncate.
 
     Returns
     -------
@@ -132,7 +142,7 @@ def compute_mahal_for_model(eval_desc_df, training_dir, models_dir,
     ood : ndarray (n_molecules,)
         1 = out-of-domain, 0 = in-domain.
     n_features : int
-        Number of RFE-selected features used.
+        Number of PCA components used.
     """
     # Load RFE features
     rfe_features = load_rfe_features(models_dir, target)
@@ -168,47 +178,70 @@ def compute_mahal_for_model(eval_desc_df, training_dir, models_dir,
     # Drop training rows with NaN
     train_valid = ~np.isnan(X_train).any(axis=1)
     X_train = X_train[train_valid]
+    n_train, n_raw_feat = X_train.shape
 
-    n_train, n_feat = X_train.shape
+    # Step 1: Standardise using training statistics
+    scaler = StandardScaler().fit(X_train)
+    X_train_sc = scaler.transform(X_train)
 
-    # Ledoit-Wolf shrinkage covariance estimation
-    lw = LedoitWolf().fit(X_train)
+    # Step 2: PCA — reduce to components explaining pca_variance
+    max_components = min(n_raw_feat, n_train - 1)
+    pca = PCA(n_components=min(max_components, n_raw_feat)).fit(X_train_sc)
+
+    cum_var = np.cumsum(pca.explained_variance_ratio_)
+    n_pca = int(np.searchsorted(cum_var, pca_variance) + 1)
+    n_pca = min(n_pca, max_components)
+
+    # Cap components so n_train / n_components >= max_feat_ratio
+    max_by_ratio = max(2, n_train // max_feat_ratio)
+    if n_pca > max_by_ratio:
+        n_pca = max_by_ratio
+
+    var_retained = cum_var[n_pca - 1] if n_pca <= len(cum_var) else cum_var[-1]
+
+    print(f"    RFE features: {n_raw_feat}, PCA components: {n_pca} "
+          f"({100*var_retained:.1f}% variance), n_train: {n_train}")
+
+    # Project into PCA space (truncated)
+    X_train_pca = X_train_sc @ pca.components_[:n_pca].T
+    n_feat = n_pca
+
+    # Step 3: Ledoit-Wolf covariance in PCA space
+    lw = LedoitWolf().fit(X_train_pca)
     mu = lw.location_
-    cov_inv = lw.precision_   # already the inverse covariance
+    cov_inv = lw.precision_
     shrinkage = lw.shrinkage_
 
-    print(f"    Ledoit-Wolf shrinkage coefficient: {shrinkage:.4f} "
-          f"(n_train={n_train}, n_feat={n_feat})")
+    print(f"    Ledoit-Wolf shrinkage: {shrinkage:.4f}")
 
-    # Compute D_M^2 for training set to establish empirical threshold
-    diff_train = X_train - mu
+    # Step 4: Empirical threshold from training D_M^2
+    diff_train = X_train_pca - mu
     train_mahal_sq = np.sum(diff_train @ cov_inv * diff_train, axis=1)
     train_mahal_sq = np.maximum(train_mahal_sq, 0)
 
-    # Empirical threshold from training distribution
     threshold_sq = np.percentile(train_mahal_sq, 100 * threshold_pct)
-    chi2_threshold_sq = chi2.ppf(threshold_pct, df=n_feat)
 
     train_median_dm = np.sqrt(np.median(train_mahal_sq))
     train_p975_dm = np.sqrt(threshold_sq)
     print(f"    Training D_M: median={train_median_dm:.2f}, "
           f"p97.5={train_p975_dm:.2f}")
-    print(f"    Empirical threshold (D_M^2): {threshold_sq:.1f} "
-          f"vs chi2: {chi2_threshold_sq:.1f}")
 
-    # Compute Mahalanobis distance for each evaluated molecule
+    # Step 5: Compute Mahalanobis distance for evaluated molecules
     n_eval = len(X_eval)
     mahal = np.full(n_eval, np.nan)
     ood = np.zeros(n_eval, dtype=int)
 
-    # Identify rows with any NaN in eval descriptors
     eval_valid = ~np.isnan(X_eval).any(axis=1)
 
     if eval_valid.sum() > 0:
         X_valid = X_eval[eval_valid]
-        diff = X_valid - mu
+        # Apply same standardisation and PCA projection
+        X_valid_sc = scaler.transform(X_valid)
+        X_valid_pca = X_valid_sc @ pca.components_[:n_pca].T
+
+        diff = X_valid_pca - mu
         mahal_sq = np.sum(diff @ cov_inv * diff, axis=1)
-        mahal_sq = np.maximum(mahal_sq, 0)  # numerical floor
+        mahal_sq = np.maximum(mahal_sq, 0)
 
         mahal[eval_valid] = np.sqrt(mahal_sq)
         ood[eval_valid] = (mahal_sq > threshold_sq).astype(int)
