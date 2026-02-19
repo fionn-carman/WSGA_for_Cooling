@@ -6,9 +6,11 @@ training set in RFE-selected descriptor space.
 For each of the 12 regression models, this script:
   1. Loads the RFE-selected feature list
   2. Loads the training data (which already contains pre-computed descriptors)
-  3. Computes the training-set mean and covariance in the RFE feature space
-  4. Computes Mahalanobis distance for every evaluated molecule
-  5. Flags molecules as OOD if D_M^2 > chi^2(p, 0.975)
+  3. Standardises features (z-score) using training statistics
+  4. Removes highly correlated descriptors (|r| > 0.95) to stabilise covariance
+  5. Computes Ledoit-Wolf shrinkage covariance in the decorrelated feature space
+  6. Computes Mahalanobis distance for every evaluated molecule
+  7. Flags molecules as OOD if D_M^2 > empirical 97.5th pctile of training D_M^2
 
 Output: augmented CSV with Mahal_{model} and OOD_{model} columns plus
         OOD_any (1 if ANY model flags OOD) and OOD_count.
@@ -41,10 +43,8 @@ except ImportError:
     def tqdm(iterable, **kwargs):
         return iterable
 
-from scipy.stats import chi2
 from sklearn.covariance import LedoitWolf
 from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
 
 # Add src/ to path for descriptor imports
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -103,18 +103,71 @@ def load_rfe_features(models_dir, target):
     return features
 
 
+def drop_correlated_features(X, feature_names, corr_threshold=0.95):
+    """Remove highly correlated features from a standardised training matrix.
+
+    Iteratively drops the feature with the most high-correlation partners
+    until no pairwise |r| exceeds corr_threshold.
+
+    Parameters
+    ----------
+    X : ndarray (n_samples, n_features)
+        Standardised training data.
+    feature_names : list of str
+        Feature names corresponding to columns of X.
+    corr_threshold : float
+        Absolute correlation threshold (default 0.95).
+
+    Returns
+    -------
+    keep_idx : list of int
+        Column indices to keep.
+    keep_names : list of str
+        Feature names to keep.
+    """
+    corr = np.corrcoef(X, rowvar=False)
+    n = corr.shape[0]
+    drop = set()
+
+    while True:
+        # Find pairs above threshold (excluding already-dropped and diagonal)
+        high_corr_count = np.zeros(n, dtype=int)
+        for i in range(n):
+            if i in drop:
+                continue
+            for j in range(i + 1, n):
+                if j in drop:
+                    continue
+                if abs(corr[i, j]) > corr_threshold:
+                    high_corr_count[i] += 1
+                    high_corr_count[j] += 1
+
+        # Check if any remain
+        active_counts = {i: high_corr_count[i] for i in range(n)
+                         if i not in drop and high_corr_count[i] > 0}
+        if not active_counts:
+            break
+
+        # Drop the feature with the most correlated partners
+        worst = max(active_counts, key=active_counts.get)
+        drop.add(worst)
+
+    keep_idx = sorted(set(range(n)) - drop)
+    keep_names = [feature_names[i] for i in keep_idx]
+    return keep_idx, keep_names
+
+
 def compute_mahal_for_model(eval_desc_df, training_dir, models_dir,
                             target, threshold_pct=0.975,
-                            pca_variance=0.95, max_feat_ratio=20):
+                            corr_threshold=0.95):
     """Compute Mahalanobis distance for evaluated molecules against one model.
 
     Pipeline:
       1. Load RFE features and training data
       2. Standardise (z-score) using training statistics
-      3. PCA to retain components explaining pca_variance of training variance
-         (avoids ill-conditioned covariance from too many correlated features)
-      4. Ledoit-Wolf covariance in PCA space
-      5. Mahalanobis distance in PCA space
+      3. Remove highly correlated features (|r| > corr_threshold)
+      4. Ledoit-Wolf covariance in decorrelated descriptor space
+      5. Mahalanobis distance
       6. OOD threshold from empirical 97.5th percentile of training D_M^2
 
     Parameters
@@ -129,11 +182,8 @@ def compute_mahal_for_model(eval_desc_df, training_dir, models_dir,
         Model/property name.
     threshold_pct : float
         Percentile for OOD threshold (default 0.975).
-    pca_variance : float
-        Fraction of training variance to retain in PCA (default 0.95).
-    max_feat_ratio : int
-        Maximum ratio of n_train / n_components to ensure stable covariance
-        (default 20). If PCA gives more components, truncate.
+    corr_threshold : float
+        Absolute correlation threshold for dropping features (default 0.95).
 
     Returns
     -------
@@ -142,7 +192,7 @@ def compute_mahal_for_model(eval_desc_df, training_dir, models_dir,
     ood : ndarray (n_molecules,)
         1 = out-of-domain, 0 = in-domain.
     n_features : int
-        Number of PCA components used.
+        Number of features used after correlation filtering.
     """
     # Load RFE features
     rfe_features = load_rfe_features(models_dir, target)
@@ -184,30 +234,20 @@ def compute_mahal_for_model(eval_desc_df, training_dir, models_dir,
     scaler = StandardScaler().fit(X_train)
     X_train_sc = scaler.transform(X_train)
 
-    # Step 2: PCA — reduce to components explaining pca_variance
-    max_components = min(n_raw_feat, n_train - 1)
-    pca = PCA(n_components=min(max_components, n_raw_feat)).fit(X_train_sc)
+    # Step 2: Remove highly correlated features
+    keep_idx, keep_names = drop_correlated_features(
+        X_train_sc, available, corr_threshold=corr_threshold
+    )
+    n_dropped = n_raw_feat - len(keep_idx)
+    n_feat = len(keep_idx)
 
-    cum_var = np.cumsum(pca.explained_variance_ratio_)
-    n_pca = int(np.searchsorted(cum_var, pca_variance) + 1)
-    n_pca = min(n_pca, max_components)
+    print(f"    RFE features: {n_raw_feat}, after decorrelation (|r|>{corr_threshold}): "
+          f"{n_feat} ({n_dropped} dropped), n_train: {n_train}")
 
-    # Cap components so n_train / n_components >= max_feat_ratio
-    max_by_ratio = max(2, n_train // max_feat_ratio)
-    if n_pca > max_by_ratio:
-        n_pca = max_by_ratio
+    X_train_sc = X_train_sc[:, keep_idx]
 
-    var_retained = cum_var[n_pca - 1] if n_pca <= len(cum_var) else cum_var[-1]
-
-    print(f"    RFE features: {n_raw_feat}, PCA components: {n_pca} "
-          f"({100*var_retained:.1f}% variance), n_train: {n_train}")
-
-    # Project into PCA space (truncated)
-    X_train_pca = X_train_sc @ pca.components_[:n_pca].T
-    n_feat = n_pca
-
-    # Step 3: Ledoit-Wolf covariance in PCA space
-    lw = LedoitWolf().fit(X_train_pca)
+    # Step 3: Ledoit-Wolf covariance in decorrelated descriptor space
+    lw = LedoitWolf().fit(X_train_sc)
     mu = lw.location_
     cov_inv = lw.precision_
     shrinkage = lw.shrinkage_
@@ -215,7 +255,7 @@ def compute_mahal_for_model(eval_desc_df, training_dir, models_dir,
     print(f"    Ledoit-Wolf shrinkage: {shrinkage:.4f}")
 
     # Step 4: Empirical threshold from training D_M^2
-    diff_train = X_train_pca - mu
+    diff_train = X_train_sc - mu
     train_mahal_sq = np.sum(diff_train @ cov_inv * diff_train, axis=1)
     train_mahal_sq = np.maximum(train_mahal_sq, 0)
 
@@ -235,11 +275,10 @@ def compute_mahal_for_model(eval_desc_df, training_dir, models_dir,
 
     if eval_valid.sum() > 0:
         X_valid = X_eval[eval_valid]
-        # Apply same standardisation and PCA projection
-        X_valid_sc = scaler.transform(X_valid)
-        X_valid_pca = X_valid_sc @ pca.components_[:n_pca].T
+        # Apply same standardisation and feature selection
+        X_valid_sc = scaler.transform(X_valid)[:, keep_idx]
 
-        diff = X_valid_pca - mu
+        diff = X_valid_sc - mu
         mahal_sq = np.sum(diff @ cov_inv * diff, axis=1)
         mahal_sq = np.maximum(mahal_sq, 0)
 
