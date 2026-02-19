@@ -1046,6 +1046,131 @@ def plot_per_model_ood_barchart(coords_2d, labels, tau_arr, per_model,
     print(f"  Saved OOD % bar chart to {out_dir}/ood_percent_by_model.png")
 
 
+def plot_top_molecules_ood_heatmap(mahal_csv, out_dir, n_top=25, dpi=300):
+    """Heatmap showing OOD status of top N molecules across all 12 models.
+
+    Reads the Mahalanobis-augmented CSV directly, ranks molecules by FOM1_avg,
+    and produces a heatmap where rows = top molecules and columns = models.
+    Cells are green (in-domain) or red (OOD).
+
+    Output file: top_{n_top}_ood_heatmap.png
+    """
+    os.makedirs(out_dir, exist_ok=True)
+
+    df = pd.read_csv(mahal_csv)
+
+    # Normalise SMILES column
+    if "CanonicalSMILES" in df.columns and "SMILES" not in df.columns:
+        df.rename(columns={"CanonicalSMILES": "SMILES"}, inplace=True)
+
+    # Determine fitness column
+    if "FOM1_avg" in df.columns:
+        fom_col = "FOM1_avg"
+    elif "FitnessScore" in df.columns:
+        fom_col = "FitnessScore"
+    else:
+        print("  WARNING: No fitness column found, skipping OOD heatmap")
+        return
+
+    # Get top N by fitness, deduplicate by SMILES
+    df_sorted = df.dropna(subset=[fom_col]).sort_values(fom_col, ascending=False)
+    df_top = df_sorted.drop_duplicates(subset=["SMILES"]).head(n_top)
+
+    if len(df_top) == 0:
+        print("  WARNING: No valid top molecules found, skipping OOD heatmap")
+        return
+
+    # Build OOD matrix: rows = molecules, columns = models
+    ordered_targets = [t for t in REGRESSION_TARGETS]
+    display_names = [MODEL_DISPLAY_NAMES.get(t, t) for t in ordered_targets]
+
+    ood_matrix = np.full((len(df_top), len(ordered_targets)), np.nan)
+
+    for j, target in enumerate(ordered_targets):
+        col_safe = _sanitise_target(target)
+        ood_col = f"OOD_{col_safe}"
+        if ood_col in df_top.columns:
+            ood_matrix[:, j] = df_top[ood_col].values.astype(float)
+
+    # Row labels: truncated SMILES + rank
+    row_labels = []
+    for rank, (_, row) in enumerate(df_top.iterrows(), 1):
+        smi = str(row.get("SMILES", "?"))
+        smi_short = smi[:35] + "..." if len(smi) > 35 else smi
+        fom = row[fom_col]
+        row_labels.append(f"#{rank}  {smi_short}  ({fom:.2f})")
+
+    # Count OOD per molecule and per model
+    ood_count_per_mol = np.nansum(ood_matrix == 1, axis=1).astype(int)
+    ood_count_per_model = np.nansum(ood_matrix == 1, axis=0).astype(int)
+    n_mols = len(df_top)
+
+    # --- Plot ---
+    fig_width = max(12, len(ordered_targets) * 1.0 + 4)
+    fig_height = max(6, n_top * 0.4 + 2)
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+
+    # Custom colormap: green=0 (in-domain), red=1 (OOD), grey=NaN/-1
+    from matplotlib.colors import ListedColormap, BoundaryNorm
+    cmap = ListedColormap(["#2CA02C", "#D64545"])
+    norm = BoundaryNorm([-.5, .5, 1.5], cmap.N)
+
+    # Replace NaN and -1 with a sentinel for display
+    display_matrix = ood_matrix.copy()
+    display_matrix[np.isnan(display_matrix)] = -0.5
+    display_matrix[display_matrix < 0] = -0.5
+
+    im = ax.imshow(display_matrix, cmap=cmap, norm=norm, aspect="auto",
+                   interpolation="nearest")
+
+    # Grey out cells where data is missing
+    for i in range(n_mols):
+        for j in range(len(ordered_targets)):
+            if np.isnan(ood_matrix[i, j]) or ood_matrix[i, j] < 0:
+                ax.add_patch(plt.Rectangle((j - 0.5, i - 0.5), 1, 1,
+                             fill=True, facecolor="#CCCCCC", edgecolor="white",
+                             linewidth=0.5))
+
+    # Grid lines
+    ax.set_xticks(np.arange(len(ordered_targets)))
+    ax.set_xticklabels(display_names, rotation=45, ha="right", fontsize=9)
+    ax.set_yticks(np.arange(n_mols))
+    ax.set_yticklabels(row_labels, fontsize=8, fontfamily="monospace")
+
+    # Add OOD count annotation on the right
+    for i in range(n_mols):
+        ax.text(len(ordered_targets) + 0.1, i,
+                f"{ood_count_per_mol[i]}/12",
+                va="center", ha="left", fontsize=8,
+                color="#D64545" if ood_count_per_mol[i] > 6 else "#333333")
+
+    # Column OOD counts at bottom
+    for j in range(len(ordered_targets)):
+        ax.text(j, n_mols + 0.3,
+                f"{ood_count_per_model[j]}/{n_mols}",
+                va="top", ha="center", fontsize=8, color="#666666")
+
+    ax.set_xlim(-0.5, len(ordered_targets) - 0.5)
+    ax.set_ylim(n_mols - 0.5, -0.5)
+
+    # Legend
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor="#2CA02C", label="In-domain"),
+        Patch(facecolor="#D64545", label="OOD"),
+        Patch(facecolor="#CCCCCC", label="N/A"),
+    ]
+    ax.legend(handles=legend_elements, loc="upper left",
+              bbox_to_anchor=(1.01, 1.0), fontsize=10, frameon=False)
+
+    ax.set_title(f"OOD Status of Top {n_top} Molecules by Property Model",
+                 fontsize=14, fontweight="bold", pad=12)
+
+    fig.tight_layout()
+    _save_fig(fig, out_dir, f"top_{n_top}_ood_heatmap", dpi)
+    print(f"  Saved top-{n_top} OOD heatmap to {out_dir}/top_{n_top}_ood_heatmap.png")
+
+
 def _draw_per_model_mahal_panel(ax, coords_2d, labels, tau_arr, mahal_arr,
                                  tau_val, display_name, fig=None):
     """Left panel of per-model 2x1: Mahalanobis distance colormap."""
@@ -1307,6 +1432,11 @@ def main():
                         coords_2d, labels, tau_arr, per_model,
                         tau_values, per_model_dir, dpi=args.dpi)
 
+                    print(f"\n  --- Top molecules OOD heatmap ---")
+                    plot_top_molecules_ood_heatmap(
+                        args.mahal_csv, per_model_dir,
+                        n_top=args.n_top, dpi=args.dpi)
+
         print_coverage_stats_per_tau(coords_2d, labels, tau_arr, tau_values)
         return
 
@@ -1424,6 +1554,11 @@ def main():
                 plot_per_model_ood_barchart(
                     coords_2d, labels, tau_arr, per_model,
                     tau_values, per_model_dir, dpi=args.dpi)
+
+                print(f"\n  --- Top molecules OOD heatmap ---")
+                plot_top_molecules_ood_heatmap(
+                    args.mahal_csv, per_model_dir,
+                    n_top=args.n_top, dpi=args.dpi)
 
     # ==================================================================
     # 5. Coverage statistics
