@@ -83,11 +83,15 @@ from plot_chemical_space import (
 # ======================================================================
 
 REGRESSION_TARGETS = [
-    "BP-Measured", "DC_exp", "Density_100C_g_cm^3", "Density_40C_g_cm^3",
-    "flashpoint", "Heat_Capacity_Constant_Pressure_100C_J_K_Mol",
-    "Heat_Capacity_Constant_Pressure_40C_J_K_Mol",
+    # Row 1: Density & Viscosity
+    "Density_40C_g_cm^3", "Density_100C_g_cm^3",
     "Kinematic_Viscosity_40C", "Kinematic_Viscosity_100C",
-    "MP-Measured", "Thermal_Conductivity_100C", "Thermal_Conductivity_40C",
+    # Row 2: Thermal Conductivity & Heat Capacity
+    "Thermal_Conductivity_40C", "Thermal_Conductivity_100C",
+    "Heat_Capacity_Constant_Pressure_40C_J_K_Mol",
+    "Heat_Capacity_Constant_Pressure_100C_J_K_Mol",
+    # Row 3: Phase-change & Electrical
+    "MP-Measured", "BP-Measured", "flashpoint", "DC_exp",
 ]
 
 # Human-readable short names for plot titles
