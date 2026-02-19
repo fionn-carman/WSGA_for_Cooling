@@ -977,6 +977,75 @@ def plot_per_model_ood_grid(coords_2d, labels, tau_arr, per_model,
     print(f"  Saved {len(tau_values)} per-model OOD grid figures to {out_dir}/")
 
 
+def plot_per_model_ood_barchart(coords_2d, labels, tau_arr, per_model,
+                                tau_values, out_dir, dpi=300):
+    """Horizontal bar chart comparing % OOD across all 12 models per tau.
+
+    If multiple tau values are present, bars are grouped side-by-side so
+    the effect of tau on each model's OOD rate is visible.
+
+    Output file: ood_percent_by_model.png
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    ordered_targets = [t for t in REGRESSION_TARGETS if t in per_model]
+    display_names = [per_model[t]["display_name"] for t in ordered_targets]
+
+    # Compute % OOD per model per tau
+    # rows = models, columns = tau values
+    pct_matrix = []
+    for target in ordered_targets:
+        ood_arr = per_model[target]["ood"]
+        row = []
+        for tau_val in tau_values:
+            tau_exp_mask = (labels == "explored") & (np.abs(tau_arr - tau_val) < 1e-6)
+            ood_vals = ood_arr[tau_exp_mask]
+            n_valid = (ood_vals >= 0).sum()
+            n_ood = (ood_vals == 1).sum()
+            pct = 100.0 * n_ood / n_valid if n_valid > 0 else 0.0
+            row.append(pct)
+        pct_matrix.append(row)
+
+    pct_matrix = np.array(pct_matrix)  # (n_models, n_tau)
+    n_models = len(ordered_targets)
+    n_tau = len(tau_values)
+
+    # Colour palette for tau values
+    tau_colors = plt.cm.Set2(np.linspace(0, 1, max(n_tau, 3)))[:n_tau]
+
+    fig_height = max(5, 0.6 * n_models * n_tau + 1.5)
+    fig, ax = plt.subplots(figsize=(10, fig_height))
+
+    bar_height = 0.7 / n_tau
+    y_positions = np.arange(n_models)
+
+    for t_idx, tau_val in enumerate(tau_values):
+        offsets = y_positions + (t_idx - (n_tau - 1) / 2) * bar_height
+        bars = ax.barh(
+            offsets, pct_matrix[:, t_idx],
+            height=bar_height, color=tau_colors[t_idx],
+            edgecolor="white", linewidth=0.5,
+            label=f"\u03c4 = {tau_val}",
+        )
+        # Add percentage labels
+        for bar, pct in zip(bars, pct_matrix[:, t_idx]):
+            ax.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height() / 2,
+                    f"{pct:.1f}%", va="center", ha="left", fontsize=9)
+
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(display_names, fontsize=11)
+    ax.set_xlabel("% Out-of-Domain", fontsize=13)
+    ax.set_title("OOD Rate by Regression Model", fontsize=15, fontweight="bold")
+    ax.invert_yaxis()
+    ax.set_xlim(0, min(100, pct_matrix.max() + 8))
+    ax.legend(fontsize=11, loc="lower right", frameon=False)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "ood_percent_by_model", dpi)
+    print(f"  Saved OOD % bar chart to {out_dir}/ood_percent_by_model.png")
+
+
 def _draw_per_model_mahal_panel(ax, coords_2d, labels, tau_arr, mahal_arr,
                                  tau_val, display_name, fig=None):
     """Left panel of per-model 2x1: Mahalanobis distance colormap."""
@@ -1233,6 +1302,11 @@ def main():
                         coords_2d, labels, tau_arr, per_model,
                         tau_values, per_model_dir, dpi=args.dpi)
 
+                    print(f"\n  --- Per-model OOD % bar chart ---")
+                    plot_per_model_ood_barchart(
+                        coords_2d, labels, tau_arr, per_model,
+                        tau_values, per_model_dir, dpi=args.dpi)
+
         print_coverage_stats_per_tau(coords_2d, labels, tau_arr, tau_values)
         return
 
@@ -1343,6 +1417,11 @@ def main():
 
                 print(f"\n  --- Per-model OOD 4x3 grids ---")
                 plot_per_model_ood_grid(
+                    coords_2d, labels, tau_arr, per_model,
+                    tau_values, per_model_dir, dpi=args.dpi)
+
+                print(f"\n  --- Per-model OOD % bar chart ---")
+                plot_per_model_ood_barchart(
                     coords_2d, labels, tau_arr, per_model,
                     tau_values, per_model_dir, dpi=args.dpi)
 
