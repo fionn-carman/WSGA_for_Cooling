@@ -226,10 +226,12 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
     smiles_col = "SMILES"
     fom_col = "FOM1_avg" if "FOM1_avg" in ga_df.columns else "FitnessScore"
 
-    # Identify top molecules per tau
+    # Identify top molecules per tau (only valid molecules)
     top_smiles_set = set()
     for tau_val in ga_df["tau"].unique():
         tau_subset = ga_df[ga_df["tau"] == tau_val]
+        if "is_valid" in tau_subset.columns:
+            tau_subset = tau_subset[tau_subset["is_valid"] == 1]
         top_df = tau_subset.nlargest(n_top, fom_col).drop_duplicates(subset=[smiles_col])
         top_smiles_set.update(top_df[smiles_col].dropna().tolist())
 
@@ -1076,8 +1078,11 @@ def plot_top_molecules_ood_heatmap(mahal_csv, out_dir, n_top=25, dpi=300):
         print("  WARNING: No fitness column found, skipping OOD heatmap")
         return
 
-    # Get top N by fitness, deduplicate by SMILES
-    df_sorted = df.dropna(subset=[fom_col]).sort_values(fom_col, ascending=False)
+    # Get top N by fitness, deduplicate by SMILES (only valid molecules)
+    df_valid = df.dropna(subset=[fom_col])
+    if "is_valid" in df_valid.columns:
+        df_valid = df_valid[df_valid["is_valid"] == 1]
+    df_sorted = df_valid.sort_values(fom_col, ascending=False)
     df_top = df_sorted.drop_duplicates(subset=["SMILES"]).head(n_top)
 
     if len(df_top) == 0:
