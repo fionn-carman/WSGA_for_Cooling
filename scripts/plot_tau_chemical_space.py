@@ -925,6 +925,58 @@ def plot_per_model_ood_figures(coords_2d, labels, tau_arr, per_model,
     print(f"  Saved {n_figs} per-model OOD figures to {out_dir}/")
 
 
+def plot_per_model_ood_grid(coords_2d, labels, tau_arr, per_model,
+                            tau_values, out_dir, dpi=300):
+    """Generate a 4x3 grid of binary OOD panels (all 12 models) per tau value.
+
+    For each tau value, produces a single figure with 12 panels arranged in
+    a 4-column x 3-row grid. Each panel shows in-domain (green) vs OOD (red)
+    classification for one regression model.
+
+    Output files: tau_{tau}_ood_grid_all_models.png
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    nrows, ncols = 3, 4
+
+    # Use REGRESSION_TARGETS ordering so layout is consistent
+    ordered_targets = [t for t in REGRESSION_TARGETS if t in per_model]
+
+    for tau_val in tau_values:
+        tau_str = f"{tau_val:.2f}".replace(".", "")
+
+        fig, axes = plt.subplots(
+            nrows, ncols,
+            figsize=(5 * ncols, 5 * nrows),
+        )
+
+        for idx, target in enumerate(ordered_targets):
+            row, col = divmod(idx, ncols)
+            ax = axes[row, col]
+            mdata = per_model[target]
+            display_name = mdata["display_name"]
+            ood_arr = mdata["ood"]
+
+            _draw_per_model_ood_panel(
+                ax, coords_2d, labels, tau_arr, ood_arr,
+                tau_val, display_name,
+            )
+            ax.set_title(display_name, fontsize=11, fontweight="bold")
+
+        # Hide any unused panels
+        for idx in range(len(ordered_targets), nrows * ncols):
+            row, col = divmod(idx, ncols)
+            axes[row, col].set_visible(False)
+
+        fig.suptitle(f"Per-Model OOD Classification — \u03c4 = {tau_val}",
+                     fontsize=18, fontweight="bold", y=1.01)
+        fig.tight_layout()
+
+        fname = f"tau_{tau_str}_ood_grid_all_models"
+        _save_fig(fig, out_dir, fname, dpi)
+
+    print(f"  Saved {len(tau_values)} per-model OOD grid figures to {out_dir}/")
+
+
 def _draw_per_model_mahal_panel(ax, coords_2d, labels, tau_arr, mahal_arr,
                                  tau_val, display_name, fig=None):
     """Left panel of per-model 2x1: Mahalanobis distance colormap."""
@@ -1176,6 +1228,11 @@ def main():
                         coords_2d, labels, tau_arr, per_model,
                         tau_values, per_model_dir, dpi=args.dpi)
 
+                    print(f"\n  --- Per-model OOD 4x3 grids ---")
+                    plot_per_model_ood_grid(
+                        coords_2d, labels, tau_arr, per_model,
+                        tau_values, per_model_dir, dpi=args.dpi)
+
         print_coverage_stats_per_tau(coords_2d, labels, tau_arr, tau_values)
         return
 
@@ -1281,6 +1338,11 @@ def main():
                 per_model_dir = os.path.join(args.out_dir, "per_model_ood")
                 print(f"\n  --- Per-model OOD figures ({len(per_model)} models x {len(tau_values)} tau) ---")
                 plot_per_model_ood_figures(
+                    coords_2d, labels, tau_arr, per_model,
+                    tau_values, per_model_dir, dpi=args.dpi)
+
+                print(f"\n  --- Per-model OOD 4x3 grids ---")
+                plot_per_model_ood_grid(
                     coords_2d, labels, tau_arr, per_model,
                     tau_values, per_model_dir, dpi=args.dpi)
 
