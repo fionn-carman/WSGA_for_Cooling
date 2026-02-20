@@ -90,6 +90,8 @@ parser.add_argument("--sc_threshold", type=float, default=3, help="Max SCScore")
 parser.add_argument("--tox_threshold", type=float, default=3, help="Max Tox21 score")
 parser.add_argument("--no_biodeg", action="store_true", help="Disable biodegradability filter")
 parser.add_argument("--tournament_k", type=int, default=3, help="Tournament selection size (k)")
+parser.add_argument("--best_elite_ratio", type=float, default=0.3,
+    help="Fraction of elites selected by raw FitnessScore (rest by NichedFitnessScore)")
 
 args = parser.parse_args()
 
@@ -111,7 +113,7 @@ TOURNAMENT_K = args.tournament_k
 # Elite Selection Split
 # - BEST_ELITE_RATIO of elites are selected by raw FitnessScore (guaranteed best performers)
 # - Remaining (1 - BEST_ELITE_RATIO) are selected by NichedFitnessScore (diversity)
-BEST_ELITE_RATIO = 0.3  # 30% by raw fitness, 70% by niched fitness
+BEST_ELITE_RATIO = args.best_elite_ratio
 BEST_ELITE_COUNT = int(ELITE_COUNT * BEST_ELITE_RATIO)
 DIVERSE_ELITE_COUNT = ELITE_COUNT - BEST_ELITE_COUNT
 

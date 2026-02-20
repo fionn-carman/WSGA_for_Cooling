@@ -5,8 +5,9 @@ Parses output directories from hyperparam_sweep.sh, extracts the top
 molecules and generation stats from each run, and identifies the best
 hyperparameter configurations.
 
-Supports two directory naming formats:
+Supports three directory naming formats:
   Stage 1: pop{}_mr{}_er{}_k{}_seed{}    (GA mechanics sweep)
+  Stage 2: pop{}_er{}_ber{}_k{}_seed{}    (full sweep with best elite ratio)
   Legacy:  pop{}_mr{}_er{}_tau{}_seed{}   (original sweep)
 
 Ranking approach:
@@ -29,6 +30,8 @@ Figures generated:
 Usage:
     python analyse_hyperparam_sweep.py --sweep_dir ../outputs/hyperparam_sweep
     python analyse_hyperparam_sweep.py --sweep_dir ../outputs/hyperparam_sweep --top_configs 20
+    python analyse_hyperparam_sweep.py --sweep_dir ../outputs/hyperparam_sweep --format stage1
+    python analyse_hyperparam_sweep.py --sweep_dir ../outputs/hyperparam_sweep_stage2 --format stage2
 """
 
 import os
@@ -56,7 +59,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 def parse_run_dir(dirname):
     """Extract hyperparameters from directory name.
 
-    Supports both Stage 1 format (with k) and legacy format (with tau).
+    Supports Stage 1 (with k), Stage 2 (with ber), and legacy (with tau).
     """
     # Stage 1 format: pop{}_mr{}_er{}_k{}_seed{}
     m = re.match(r"pop(\d+)_mr([\d.]+)_er([\d.]+)_k(\d+)_seed(\d+)", dirname)
@@ -68,6 +71,18 @@ def parse_run_dir(dirname):
             "k": int(m.group(4)),
             "seed": int(m.group(5)),
             "format": "stage1",
+        }
+
+    # Stage 2 format: pop{}_er{}_ber{}_k{}_seed{}
+    m = re.match(r"pop(\d+)_er([\d.]+)_ber([\d.]+)_k(\d+)_seed(\d+)", dirname)
+    if m:
+        return {
+            "pop": int(m.group(1)),
+            "er": float(m.group(2)),
+            "ber": float(m.group(3)),
+            "k": int(m.group(4)),
+            "seed": int(m.group(5)),
+            "format": "stage2",
         }
 
     # Legacy format: pop{}_mr{}_er{}_tau{}_seed{}
@@ -131,8 +146,8 @@ def plot_pairwise_heatmaps(runs_df, group_cols, out_dir):
     axes = np.array(axes).flatten()
 
     param_labels = {"pop": "Population Size", "mr": "Mutation Rate",
-                    "er": "Elitism Rate", "k": "Tournament Size (k)",
-                    "tau": "Niching Threshold (τ)"}
+                    "er": "Elitism Rate", "ber": "Best Elite Ratio",
+                    "k": "Tournament Size (k)", "tau": "Niching Threshold (τ)"}
 
     for idx, (p1, p2) in enumerate(pairs):
         ax = axes[idx]
@@ -173,8 +188,8 @@ def plot_pairwise_heatmaps(runs_df, group_cols, out_dir):
 def plot_marginal_boxplots(runs_df, group_cols, out_dir):
     """Box plot of #1 FOM1_avg for each parameter value."""
     param_labels = {"pop": "Population Size", "mr": "Mutation Rate",
-                    "er": "Elitism Rate", "k": "Tournament Size (k)",
-                    "tau": "Niching Threshold (τ)"}
+                    "er": "Elitism Rate", "ber": "Best Elite Ratio",
+                    "k": "Tournament Size (k)", "tau": "Niching Threshold (τ)"}
 
     fig, axes = plt.subplots(1, len(group_cols), figsize=(4 * len(group_cols), 5))
     if len(group_cols) == 1:
@@ -210,7 +225,7 @@ def plot_convergence_curves(runs_df, group_cols, sweep_dir, out_dir, top_n=5):
     cmap = plt.cm.tab10
 
     param_labels_short = {"pop": "pop", "mr": "mr", "er": "er",
-                          "k": "k", "tau": "τ"}
+                          "ber": "ber", "k": "k", "tau": "τ"}
 
     for rank, (config, _) in enumerate(top_configs.items()):
         if not isinstance(config, tuple):
@@ -223,7 +238,10 @@ def plot_convergence_curves(runs_df, group_cols, sweep_dir, out_dir, top_n=5):
 
         all_gen_fitness = []
         for d in seed_dirs:
-            gs = load_generation_stats(os.path.join(sweep_dir, d))
+            d_path = os.path.join(sweep_dir, d)
+            if not os.path.isdir(d_path):
+                continue
+            gs = load_generation_stats(d_path)
             if gs is None:
                 continue
             if "FitnessScore_max" in gs.columns:
@@ -261,8 +279,8 @@ def plot_convergence_curves(runs_df, group_cols, sweep_dir, out_dir, top_n=5):
 def plot_parallel_coordinates(configs_df, group_cols, out_dir):
     """Parallel coordinates plot coloured by mean #1 FOM1_avg."""
     param_labels = {"pop": "Population\nSize", "mr": "Mutation\nRate",
-                    "er": "Elitism\nRate", "k": "Tournament\nSize (k)",
-                    "tau": "Niching\nThreshold (τ)"}
+                    "er": "Elitism\nRate", "ber": "Best Elite\nRatio",
+                    "k": "Tournament\nSize (k)", "tau": "Niching\nThreshold (τ)"}
 
     fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -461,7 +479,8 @@ def plot_scaffold_distribution(top_unique, smiles_col, out_dir, n_mols=50, top_s
 # Main analysis
 # ======================================================================
 
-def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
+def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50,
+                   format_filter=None):
 
     # ------------------------------------------------------------------
     # 1. Scan all run directories
@@ -469,6 +488,7 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
     runs = []
     skipped = 0
     detected_format = None
+    format_counts = {"stage1": 0, "stage2": 0, "legacy": 0}
     for dirname in sorted(os.listdir(sweep_dir)):
         run_path = os.path.join(sweep_dir, dirname)
         if not os.path.isdir(run_path):
@@ -477,8 +497,28 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
         if params is None:
             continue
 
+        format_counts[params["format"]] += 1
+
+        # Skip directories that don't match the requested format
+        if format_filter and params["format"] != format_filter:
+            continue
+
         if detected_format is None:
             detected_format = params["format"]
+        elif params["format"] != detected_format:
+            # Mixed formats without explicit filter — auto-select the
+            # dominant format and restart the scan
+            if format_filter is None:
+                dominant = max(format_counts, key=format_counts.get)
+                counts_str = ", ".join(f"{k}={v}" for k, v in format_counts.items() if v > 0)
+                print(f"WARNING: Mixed directory formats detected "
+                      f"({counts_str}). "
+                      f"Auto-selecting '{dominant}' format.\n"
+                      f"  Use --format stage1|stage2|legacy to override.\n")
+                return analyse_sweep(sweep_dir, top_n_configs,
+                                     top_n_molecules,
+                                     format_filter=dominant)
+            continue
 
         top_df = load_top_molecules(run_path)
         if top_df is None:
@@ -540,6 +580,8 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
     # ------------------------------------------------------------------
     if detected_format == "stage1":
         group_cols = ["pop", "mr", "er", "k"]
+    elif detected_format == "stage2":
+        group_cols = ["pop", "er", "ber", "k"]
     else:
         group_cols = ["pop", "mr", "er", "tau"]
 
@@ -570,7 +612,7 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
 
     # Build header dynamically based on group cols
     param_headers = {"pop": ("Pop", 6), "mr": ("MR", 5), "er": ("ER", 5),
-                     "k": ("k", 4), "tau": ("Tau", 6)}
+                     "ber": ("BER", 5), "k": ("k", 4), "tau": ("Tau", 6)}
 
     print(f"{'='*90}")
     print(f"  TOP {top_n_configs} HYPERPARAMETER CONFIGS (ranked by mean #1 FOM1_avg across {n_seeds} seeds)")
@@ -625,6 +667,8 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
     all_top_mols = []
     for _, run in runs_df.iterrows():
         run_path = os.path.join(sweep_dir, run["dir"])
+        if not os.path.isdir(run_path):
+            continue
         top_df = load_top_molecules(run_path)
         if top_df is None:
             continue
@@ -715,6 +759,11 @@ if __name__ == "__main__":
                         default="../outputs/hyperparam_sweep")
     parser.add_argument("--top_configs", type=int, default=10)
     parser.add_argument("--top_molecules", type=int, default=50)
+    parser.add_argument("--format", type=str, choices=["stage1", "stage2", "legacy"],
+                        default=None,
+                        help="Only analyse dirs matching this format "
+                             "(auto-detects if omitted)")
     args = parser.parse_args()
 
-    analyse_sweep(args.sweep_dir, args.top_configs, args.top_molecules)
+    analyse_sweep(args.sweep_dir, args.top_configs, args.top_molecules,
+                  format_filter=args.format)
