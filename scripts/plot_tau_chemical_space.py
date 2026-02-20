@@ -1054,15 +1054,34 @@ def plot_per_model_ood_barchart(coords_2d, labels, tau_arr, per_model,
     print(f"  Saved OOD % bar chart to {out_dir}/ood_percent_by_model.png")
 
 
+def _smiles_to_image(smi, size=(300, 200)):
+    """Render a SMILES string as a PIL Image using RDKit."""
+    from rdkit.Chem import Draw
+    mol = Chem.MolFromSmiles(smi)
+    if mol is None:
+        # Return a blank image if parsing fails
+        from PIL import Image
+        return Image.new("RGB", size, (255, 255, 255))
+    return Draw.MolToImage(mol, size=size)
+
+
 def plot_top_molecules_ood_heatmap(mahal_csv, out_dir, n_top=25, dpi=300):
-    """Heatmap showing OOD status of top N molecules across all 12 models.
+    """Publication-quality heatmap: OOD status of top molecules with structures.
+
+    Layout (per molecule row):
+      [Rank + FOM1] | [2D structure] | [12 OOD cells] | [OOD count]
 
     Reads the Mahalanobis-augmented CSV directly, ranks molecules by FOM1_avg,
     and produces a heatmap where rows = top molecules and columns = models.
-    Cells are green (in-domain) or red (OOD).
+    Cells are green (in-domain) or red (OOD) with internal grid lines.
 
     Output file: top_{n_top}_ood_heatmap.png
     """
+    from matplotlib.colors import ListedColormap, BoundaryNorm
+    from matplotlib.patches import Patch
+    from matplotlib.gridspec import GridSpec
+    from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+
     os.makedirs(out_dir, exist_ok=True)
 
     df = pd.read_csv(mahal_csv)
@@ -1093,93 +1112,167 @@ def plot_top_molecules_ood_heatmap(mahal_csv, out_dir, n_top=25, dpi=300):
         print("  WARNING: No valid top molecules found, skipping OOD heatmap")
         return
 
+    n_mols = len(df_top)
+
     # Build OOD matrix: rows = molecules, columns = models
     ordered_targets = [t for t in REGRESSION_TARGETS]
     display_names = [MODEL_DISPLAY_NAMES.get(t, t) for t in ordered_targets]
+    n_props = len(ordered_targets)
 
-    ood_matrix = np.full((len(df_top), len(ordered_targets)), np.nan)
-
+    ood_matrix = np.full((n_mols, n_props), np.nan)
     for j, target in enumerate(ordered_targets):
         col_safe = _sanitise_target(target)
         ood_col = f"OOD_{col_safe}"
         if ood_col in df_top.columns:
             ood_matrix[:, j] = df_top[ood_col].values.astype(float)
 
-    # Row labels: truncated SMILES + rank
-    row_labels = []
-    for rank, (_, row) in enumerate(df_top.iterrows(), 1):
-        smi = str(row.get("SMILES", "?"))
-        smi_short = smi[:35] + "..." if len(smi) > 35 else smi
-        fom = row[fom_col]
-        row_labels.append(f"#{rank}  {smi_short}  ({fom:.2f})")
-
-    # Count OOD per molecule and per model
     ood_count_per_mol = np.nansum(ood_matrix == 1, axis=1).astype(int)
     ood_count_per_model = np.nansum(ood_matrix == 1, axis=0).astype(int)
-    n_mols = len(df_top)
 
-    # --- Plot ---
-    fig_width = max(12, len(ordered_targets) * 1.0 + 4)
-    fig_height = max(6, n_top * 0.4 + 2)
-    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    # --- Render molecular structure images ---
+    struct_images = []
+    for _, row in df_top.iterrows():
+        smi = str(row.get("SMILES", ""))
+        struct_images.append(_smiles_to_image(smi, size=(300, 200)))
 
-    # Custom colormap: green=0 (in-domain), red=1 (OOD), grey=NaN/-1
-    from matplotlib.colors import ListedColormap, BoundaryNorm
-    cmap = ListedColormap(["#2CA02C", "#D64545"])
-    norm = BoundaryNorm([-.5, .5, 1.5], cmap.N)
+    # --- Figure layout ---
+    # Columns: structure panel | heatmap | count annotation
+    row_height = 0.75  # inches per molecule row
+    struct_width = 2.5  # inches for structure column
+    heat_width = n_props * 0.55  # inches for heatmap columns
+    count_width = 0.6  # inches for OOD count column
+    total_width = struct_width + heat_width + count_width + 0.8
+    total_height = n_mols * row_height + 2.0  # extra for header/footer
 
-    # Replace NaN and -1 with a sentinel for display
+    fig = plt.figure(figsize=(total_width, total_height))
+
+    # GridSpec: [structure_col | heatmap_col | count_col]
+    gs = GridSpec(
+        1, 3, figure=fig,
+        width_ratios=[struct_width, heat_width, count_width],
+        wspace=0.05,
+    )
+
+    ax_struct = fig.add_subplot(gs[0, 0])
+    ax_heat = fig.add_subplot(gs[0, 1])
+    ax_count = fig.add_subplot(gs[0, 2])
+
+    # --- Structure panel (left): rank labels + molecular images ---
+    ax_struct.set_xlim(0, 1)
+    ax_struct.set_ylim(n_mols, 0)
+    ax_struct.axis("off")
+
+    for i, (_, row) in enumerate(df_top.iterrows()):
+        fom = row[fom_col]
+        rank = i + 1
+
+        # Rank + FOM label
+        ax_struct.text(
+            0.0, i + 0.5, f"{rank}.",
+            va="center", ha="left", fontsize=9, fontweight="bold",
+            transform=ax_struct.transData,
+        )
+        ax_struct.text(
+            0.08, i + 0.5, f"FOM\u2081 = {fom:.1f}",
+            va="center", ha="left", fontsize=8, color="#555555",
+            transform=ax_struct.transData,
+        )
+
+        # Molecular structure image
+        img = struct_images[i]
+        imagebox = OffsetImage(np.array(img), zoom=0.28)
+        imagebox.image.axes = ax_struct
+        ab = AnnotationBbox(
+            imagebox, (0.62, i + 0.5),
+            xycoords="data", frameon=False,
+            box_alignment=(0.5, 0.5),
+        )
+        ax_struct.add_artist(ab)
+
+    # --- Heatmap panel (centre) ---
+    cmap = ListedColormap(["#4CAF50", "#E53935"])  # green, red
+    norm = BoundaryNorm([-0.5, 0.5, 1.5], cmap.N)
+
     display_matrix = ood_matrix.copy()
     display_matrix[np.isnan(display_matrix)] = -0.5
     display_matrix[display_matrix < 0] = -0.5
 
-    im = ax.imshow(display_matrix, cmap=cmap, norm=norm, aspect="auto",
-                   interpolation="nearest")
+    ax_heat.imshow(
+        display_matrix, cmap=cmap, norm=norm, aspect="auto",
+        interpolation="nearest", extent=(-0.5, n_props - 0.5, n_mols - 0.5, -0.5),
+    )
 
-    # Grey out cells where data is missing
+    # Grey patches for missing data
     for i in range(n_mols):
-        for j in range(len(ordered_targets)):
+        for j in range(n_props):
             if np.isnan(ood_matrix[i, j]) or ood_matrix[i, j] < 0:
-                ax.add_patch(plt.Rectangle((j - 0.5, i - 0.5), 1, 1,
-                             fill=True, facecolor="#CCCCCC", edgecolor="white",
-                             linewidth=0.5))
+                ax_heat.add_patch(plt.Rectangle(
+                    (j - 0.5, i - 0.5), 1, 1,
+                    facecolor="#E0E0E0", edgecolor="white", linewidth=0.5,
+                ))
 
     # Grid lines
-    ax.set_xticks(np.arange(len(ordered_targets)))
-    ax.set_xticklabels(display_names, rotation=45, ha="right", fontsize=9)
-    ax.set_yticks(np.arange(n_mols))
-    ax.set_yticklabels(row_labels, fontsize=8, fontfamily="monospace")
+    for i in range(n_mols + 1):
+        ax_heat.axhline(i - 0.5, color="white", linewidth=1.2)
+    for j in range(n_props + 1):
+        ax_heat.axvline(j - 0.5, color="white", linewidth=1.2)
 
-    # Add OOD count annotation on the right
-    for i in range(n_mols):
-        ax.text(len(ordered_targets) + 0.1, i,
-                f"{ood_count_per_mol[i]}/12",
-                va="center", ha="left", fontsize=8,
-                color="#D64545" if ood_count_per_mol[i] > 6 else "#333333")
+    # Column labels (top)
+    ax_heat.set_xticks(np.arange(n_props))
+    ax_heat.set_xticklabels(display_names, rotation=50, ha="right", fontsize=8)
+    ax_heat.tick_params(axis="x", which="both", length=0, pad=4)
+    ax_heat.xaxis.set_ticks_position("top")
+    ax_heat.xaxis.set_label_position("top")
+    ax_heat.set_yticks([])
 
     # Column OOD counts at bottom
-    for j in range(len(ordered_targets)):
-        ax.text(j, n_mols + 0.3,
-                f"{ood_count_per_model[j]}/{n_mols}",
-                va="top", ha="center", fontsize=8, color="#666666")
+    for j in range(n_props):
+        ax_heat.text(
+            j, n_mols - 0.15,
+            f"{ood_count_per_model[j]}/{n_mols}",
+            va="top", ha="center", fontsize=7, color="#777777",
+        )
 
-    ax.set_xlim(-0.5, len(ordered_targets) - 0.5)
-    ax.set_ylim(n_mols - 0.5, -0.5)
+    ax_heat.set_xlim(-0.5, n_props - 0.5)
+    ax_heat.set_ylim(n_mols - 0.5, -0.5)
 
-    # Legend
-    from matplotlib.patches import Patch
+    # Remove heatmap border spines
+    for spine in ax_heat.spines.values():
+        spine.set_visible(False)
+
+    # --- Count column (right) ---
+    ax_count.set_xlim(0, 1)
+    ax_count.set_ylim(n_mols, 0)
+    ax_count.axis("off")
+
+    # Header
+    ax_count.text(0.5, -0.3, "OOD", va="bottom", ha="center",
+                  fontsize=8, fontweight="bold", color="#333333")
+
+    for i in range(n_mols):
+        count = ood_count_per_mol[i]
+        color = "#E53935" if count > 6 else ("#FF9800" if count > 3 else "#333333")
+        ax_count.text(
+            0.5, i + 0.5,
+            f"{count}/12",
+            va="center", ha="center", fontsize=8.5,
+            fontweight="bold" if count > 0 else "normal",
+            color=color,
+        )
+
+    # --- Legend ---
     legend_elements = [
-        Patch(facecolor="#2CA02C", label="In-domain"),
-        Patch(facecolor="#D64545", label="OOD"),
-        Patch(facecolor="#CCCCCC", label="N/A"),
+        Patch(facecolor="#4CAF50", edgecolor="white", label="In-domain"),
+        Patch(facecolor="#E53935", edgecolor="white", label="Out-of-domain"),
+        Patch(facecolor="#E0E0E0", edgecolor="white", label="N/A"),
     ]
-    ax.legend(handles=legend_elements, loc="upper left",
-              bbox_to_anchor=(1.01, 1.0), fontsize=10, frameon=False)
+    fig.legend(
+        handles=legend_elements, loc="lower center",
+        ncol=3, fontsize=9, frameon=False,
+        bbox_to_anchor=(0.5, -0.01),
+    )
 
-    ax.set_title(f"OOD Status of Top {n_top} Molecules by Property Model",
-                 fontsize=14, fontweight="bold", pad=12)
-
-    fig.tight_layout()
+    fig.subplots_adjust(top=0.88, bottom=0.05, left=0.02, right=0.98)
     _save_fig(fig, out_dir, f"top_{n_top}_ood_heatmap", dpi)
     print(f"  Saved top-{n_top} OOD heatmap to {out_dir}/top_{n_top}_ood_heatmap.png")
 
