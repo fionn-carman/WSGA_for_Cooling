@@ -131,6 +131,41 @@ def load_generation_stats(run_path):
     return safe_read_csv(path)
 
 
+def load_all_evaluated(run_path, mp_hard=-30):
+    """Load all_evaluated_molecules.csv with hard MP filter applied.
+
+    Filters to molecules that pass all hard constraints:
+      - is_valid == 1
+      - FitnessScore > 0
+      - MP-Measured < mp_hard (default -30°C, treating the soft threshold as hard)
+
+    Returns the filtered DataFrame sorted by FOM1_avg descending,
+    or None if the file doesn't exist or is empty after filtering.
+    """
+    path = os.path.join(run_path, "all_evaluated_molecules.csv")
+    if not os.path.exists(path):
+        return None
+    df = safe_read_csv(path)
+    if df is None or df.empty:
+        return None
+
+    mask = pd.Series(True, index=df.index)
+    if "is_valid" in df.columns:
+        mask &= (df["is_valid"] == 1)
+    if "FitnessScore" in df.columns:
+        mask &= (df["FitnessScore"] > 0)
+    if "MP-Measured" in df.columns:
+        mask &= (df["MP-Measured"] < mp_hard)
+    df = df[mask]
+
+    if df.empty:
+        return None
+
+    sort_col = "FOM1_avg" if "FOM1_avg" in df.columns else "FitnessScore"
+    df = df.sort_values(sort_col, ascending=False)
+    return df
+
+
 def load_best_fom1_per_generation(run_path, mp_hard=-30):
     """Load all_evaluated_molecules.csv and compute best FOM1_avg per generation.
 
@@ -711,29 +746,13 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
         if params is None:
             continue
 
-        top_df = load_top_molecules(run_path)
-        if top_df is None:
+        # Use all_evaluated_molecules.csv with hard MP filter (< -30°C)
+        valid_df = load_all_evaluated(run_path, mp_hard=-30)
+        if valid_df is None:
             skipped += 1
             continue
 
         gen_stats = load_generation_stats(run_path)
-
-        # Filter to valid molecules that pass the hard MP threshold
-        if "is_valid" in top_df.columns:
-            valid_df = top_df[top_df["is_valid"] == 1]
-        else:
-            valid_df = top_df
-
-        if "FitnessScore" in valid_df.columns:
-            valid_df = valid_df[valid_df["FitnessScore"] > 0]
-
-        mp_col = "MP-Measured"
-        if mp_col in valid_df.columns:
-            valid_df = valid_df[valid_df[mp_col] < -30]
-
-        if valid_df.empty:
-            skipped += 1
-            continue
 
         best = valid_df.iloc[0]
         top10 = valid_df.head(10)
@@ -749,7 +768,7 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
             "top10_mean_FOM1_avg": top10["FOM1_avg"].mean() if "FOM1_avg" in top10.columns else np.nan,
             "top10_mean_FOM1_40": top10["FOM1_40"].mean() if "FOM1_40" in top10.columns else np.nan,
             "top10_mean_FOM1_100": top10["FOM1_100"].mean() if "FOM1_100" in top10.columns else np.nan,
-            "n_valid_top25": int(top_df["is_valid"].sum()) if "is_valid" in top_df.columns else len(top_df),
+            "n_valid": len(valid_df),
         })
 
         if gen_stats is not None and not gen_stats.empty:
@@ -858,28 +877,21 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
         run_path = os.path.join(sweep_dir, run["dir"])
         if not os.path.isdir(run_path):
             continue
-        top_df = load_top_molecules(run_path)
-        if top_df is None:
+        # Use all_evaluated_molecules.csv with hard MP filter (< -30°C)
+        eval_df = load_all_evaluated(run_path, mp_hard=-30)
+        if eval_df is None:
             continue
-        top_df = top_df.copy()
+        eval_df = eval_df.copy()
         config_parts = [f"{c}{run[c]}" for c in GROUP_COLS]
-        top_df["source_config"] = "_".join(config_parts)
-        top_df["source_seed"] = run["seed"]
-        all_top_mols.append(top_df)
+        eval_df["source_config"] = "_".join(config_parts)
+        eval_df["source_seed"] = run["seed"]
+        all_top_mols.append(eval_df)
 
     top_unique = None
     if all_top_mols:
         combined = pd.concat(all_top_mols, ignore_index=True)
         smiles_col = "CanonicalSMILES" if "CanonicalSMILES" in combined.columns else "SMILES"
         sort_col = "FOM1_avg" if "FOM1_avg" in combined.columns else "FitnessScore"
-
-        # Filter to valid molecules
-        if "is_valid" in combined.columns:
-            combined = combined[combined["is_valid"] == 1]
-        if "FitnessScore" in combined.columns:
-            combined = combined[combined["FitnessScore"] > 0]
-        if "MP-Measured" in combined.columns:
-            combined = combined[combined["MP-Measured"] < -30]
 
         combined = combined.sort_values(sort_col, ascending=False)
         unique = combined.drop_duplicates(subset=[smiles_col], keep="first")
