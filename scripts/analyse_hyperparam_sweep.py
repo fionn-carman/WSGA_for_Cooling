@@ -131,6 +131,43 @@ def load_generation_stats(run_path):
     return safe_read_csv(path)
 
 
+def load_best_fom1_per_generation(run_path, mp_hard=-30):
+    """Load all_evaluated_molecules.csv and compute best FOM1_avg per generation.
+
+    Filters to molecules that pass all hard constraints:
+      - is_valid == 1
+      - FitnessScore > 0
+      - MP-Measured < mp_hard (soft threshold, default -30°C)
+
+    Returns a Series indexed by generation with the best (max) FOM1_avg,
+    or None if the file doesn't exist.
+    """
+    path = os.path.join(run_path, "all_evaluated_molecules.csv")
+    if not os.path.exists(path):
+        return None
+    df = safe_read_csv(path)
+    if df is None or df.empty:
+        return None
+
+    # Filter to valid molecules passing hard MP threshold
+    mask = pd.Series(True, index=df.index)
+    if "is_valid" in df.columns:
+        mask &= (df["is_valid"] == 1)
+    if "FitnessScore" in df.columns:
+        mask &= (df["FitnessScore"] > 0)
+    if "MP-Measured" in df.columns:
+        mask &= (df["MP-Measured"] < mp_hard)
+    df = df[mask]
+
+    if df.empty or "FOM1_avg" not in df.columns or "generation" not in df.columns:
+        return None
+
+    # Compute cumulative best FOM1_avg up to each generation
+    best_per_gen = df.groupby("generation")["FOM1_avg"].max()
+    best_per_gen = best_per_gen.sort_index().cummax()
+    return best_per_gen
+
+
 # ======================================================================
 # Figures
 # ======================================================================
@@ -247,7 +284,12 @@ def plot_marginal_violins(runs_df, out_dir):
 
 
 def plot_convergence_curves(runs_df, sweep_dir, out_dir, top_n=5):
-    """Convergence curves for the top N configs (averaged over seeds)."""
+    """Convergence curves for the top N configs (averaged over seeds).
+
+    Computes the cumulative best FOM1_avg per generation from the
+    all_evaluated_molecules.csv files, filtering to molecules that pass
+    all hard constraints (is_valid, FitnessScore > 0, MP < -30°C).
+    """
     config_means = runs_df.groupby(GROUP_COLS)["best_FOM1_avg"].mean()
     top_configs = config_means.sort_values(ascending=False).head(top_n)
 
@@ -263,23 +305,19 @@ def plot_convergence_curves(runs_df, sweep_dir, out_dir, top_n=5):
             mask &= (runs_df[col] == val)
         seed_dirs = runs_df.loc[mask, "dir"].tolist()
 
-        all_gen_fitness = []
+        all_gen_curves = []
         for d in seed_dirs:
             d_path = os.path.join(sweep_dir, d)
             if not os.path.isdir(d_path):
                 continue
-            gs = load_generation_stats(d_path)
-            if gs is None:
-                continue
-            if "FOM1_avg_max" in gs.columns:
-                all_gen_fitness.append(gs.set_index("generation")["FOM1_avg_max"])
-            elif "FitnessScore_max" in gs.columns:
-                all_gen_fitness.append(gs.set_index("generation")["FitnessScore_max"])
+            curve = load_best_fom1_per_generation(d_path)
+            if curve is not None and not curve.empty:
+                all_gen_curves.append(curve)
 
-        if not all_gen_fitness:
+        if not all_gen_curves:
             continue
 
-        combined = pd.concat(all_gen_fitness, axis=1)
+        combined = pd.concat(all_gen_curves, axis=1)
         mean_curve = combined.mean(axis=1)
         std_curve = combined.std(axis=1)
 
@@ -287,7 +325,7 @@ def plot_convergence_curves(runs_df, sweep_dir, out_dir, top_n=5):
                           for c, v in zip(GROUP_COLS, config))
         color = cmap(rank)
         ax.plot(mean_curve.index, mean_curve.values, label=label, color=color, linewidth=2)
-        if len(all_gen_fitness) > 1:
+        if len(all_gen_curves) > 1:
             ax.fill_between(mean_curve.index,
                             (mean_curve - std_curve).values,
                             (mean_curve + std_curve).values,
@@ -691,7 +729,7 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
 
         mp_col = "MP-Measured"
         if mp_col in valid_df.columns:
-            valid_df = valid_df[valid_df[mp_col] < -10]
+            valid_df = valid_df[valid_df[mp_col] < -30]
 
         if valid_df.empty:
             skipped += 1
@@ -841,7 +879,7 @@ def analyse_sweep(sweep_dir, top_n_configs=10, top_n_molecules=50):
         if "FitnessScore" in combined.columns:
             combined = combined[combined["FitnessScore"] > 0]
         if "MP-Measured" in combined.columns:
-            combined = combined[combined["MP-Measured"] < -10]
+            combined = combined[combined["MP-Measured"] < -30]
 
         combined = combined.sort_values(sort_col, ascending=False)
         unique = combined.drop_duplicates(subset=[smiles_col], keep="first")

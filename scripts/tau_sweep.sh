@@ -47,15 +47,15 @@ cd "$DIRECTORY"
 
 # ==============================
 # Best GA parameters from Stage 2 hyperparam sweep
-# Config: pop=3000, er=0.1, ber=0.25, k=7
-# Mean Best FOM1: 93.98 (std: 4.57)
-# Highest convergence ceiling (~102) across top 5 configs
+# Population size is the only significant hyperparameter (21% of variance).
+# ER, BER, k explain <0.3% each — seed variance (55%) dominates.
+# Balanced config chosen to give tau the most room to affect diversity.
 # ==============================
 POP=3000
 MR=0.8
-ER=0.1
-BER=0.25
-K=7
+ER=0.25
+BER=0.5
+K=3
 NUM_GENERATIONS=150
 
 # ==============================
