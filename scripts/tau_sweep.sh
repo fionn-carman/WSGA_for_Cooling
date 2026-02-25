@@ -46,13 +46,16 @@ conda activate rdkit_env
 cd "$DIRECTORY"
 
 # ==============================
-# Best GA parameters from Stage 1
-# (UPDATE THESE after running analyse_hyperparam_sweep.py)
+# Best GA parameters from Stage 2 hyperparam sweep
+# Config: pop=3000, er=0.1, ber=0.25, k=7
+# Mean Best FOM1: 93.98 (std: 4.57)
+# Highest convergence ceiling (~102) across top 5 configs
 # ==============================
-POP=2000
+POP=3000
 MR=0.8
-ER=0.3
-K=3
+ER=0.1
+BER=0.25
+K=7
 NUM_GENERATIONS=150
 
 # ==============================
@@ -95,10 +98,11 @@ echo "WSGA Tau Sweep — Stage 2" >> "$log_file"
 echo "========================================" >> "$log_file"
 echo "Array index:       $N" >> "$log_file"
 echo "Target:            $TARGET" >> "$log_file"
-echo "Population size:   $POP (from Stage 1)" >> "$log_file"
-echo "Mutation rate:     $MR (from Stage 1)" >> "$log_file"
-echo "Elitism rate:      $ER (from Stage 1)" >> "$log_file"
-echo "Tournament k:      $K (from Stage 1)" >> "$log_file"
+echo "Population size:   $POP (from Stage 2)" >> "$log_file"
+echo "Mutation rate:     $MR (from Stage 2)" >> "$log_file"
+echo "Elitism rate:      $ER (from Stage 2)" >> "$log_file"
+echo "Best elite ratio:  $BER (from Stage 2)" >> "$log_file"
+echo "Tournament k:      $K (from Stage 2)" >> "$log_file"
 echo "Tau (niching):     $TAU" >> "$log_file"
 echo "Generations:       $NUM_GENERATIONS" >> "$log_file"
 echo "Seed label:        $SEED" >> "$log_file"
@@ -114,6 +118,7 @@ python3 ../src/wsga.py \
     --target $TARGET \
     --population_size $POP \
     --elitism_rate $ER \
+    --best_elite_ratio $BER \
     --mutation_rate $MR \
     --tournament_k $K \
     --Tau $TAU \
