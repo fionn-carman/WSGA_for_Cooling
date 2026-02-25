@@ -2,23 +2,22 @@
 #PBS -N wsga_mahal_compute
 #PBS -l walltime=06:00:00
 #PBS -l select=1:ncpus=1:mem=32gb
-#PBS -J 0-5
+#PBS -J 0-39
 #PBS -o /dev/null
 #PBS -e /dev/null
 
 # ============================================================
-# Mahalanobis Distance — Tau Comparison (Parallel)
+# Mahalanobis Distance — Tau Sweep (Parallel)
 # ============================================================
 #
 # PBS array job: runs compute_mahalanobis.py in parallel for
-# each of the 6 tau/seed configurations.
+# each of the 40 tau/seed configurations from the tau sweep.
 #
-# Array index mapping:
-#   0 → tau0.05_seed42      3 → tau0.20_seed42
-#   1 → tau0.05_seed123     4 → tau0.20_seed123
-#   2 → tau0.05_seed7       5 → tau0.20_seed7
+# Grid: 8 tau values × 5 seeds = 40 jobs
+#   tau: [0.0, 0.05, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50]
+#   seeds: [42, 123, 7, 256, 999]
 #
-# After all 6 complete, submit the plotting job:
+# After all 40 complete, submit the plotting job:
 #   qsub -W depend=afterokarray:<ARRAY_JOB_ID> mahal_tau_plot.sh
 #
 # Or submit both at once:
@@ -50,25 +49,27 @@ cd "$DIRECTORY"
 # ==============================
 # Configuration
 # ==============================
-COMPARISON_DIR="../outputs/tau_comparison"
+SWEEP_DIR="../outputs/tau_sweep"
 
-dirs=(
-    "tau0.05_seed42"
-    "tau0.05_seed123"
-    "tau0.05_seed7"
-    "tau0.20_seed42"
-    "tau0.20_seed123"
-    "tau0.20_seed7"
-)
+tau_values=(0.0 0.05 0.10 0.15 0.20 0.30 0.40 0.50)
+seeds=(42 123 7 256 999)
 
-RUN_DIR="${dirs[$N]}"
-CSV_PATH="${COMPARISON_DIR}/${RUN_DIR}/all_evaluated_molecules.csv"
-OUT_PATH="${COMPARISON_DIR}/${RUN_DIR}/all_evaluated_molecules_mahal.csv"
+n_seed=${#seeds[@]}
+seed_idx=$((N % n_seed))
+tau_idx=$((N / n_seed))
+
+TAU=${tau_values[$tau_idx]}
+SEED=${seeds[$seed_idx]}
+
+RUN_DIR="tau${TAU}_seed${SEED}"
+
+CSV_PATH="${SWEEP_DIR}/${RUN_DIR}/all_evaluated_molecules.csv"
+OUT_PATH="${SWEEP_DIR}/${RUN_DIR}/all_evaluated_molecules_mahal.csv"
 
 # ==============================
 # Logging
 # ==============================
-LOG_DIR="${COMPARISON_DIR}/${RUN_DIR}"
+LOG_DIR="${SWEEP_DIR}/${RUN_DIR}"
 mkdir -p "$LOG_DIR"
 log_file="${LOG_DIR}/mahalanobis.log"
 
