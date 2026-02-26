@@ -145,12 +145,15 @@ def load_target_data(data_dir, target_name, shared_smiles):
     """
     csv_path = os.path.join(data_dir, f"{target_name}_cleaned.csv")
     df = pd.read_csv(csv_path)
+    # Source CSVs can contain duplicate SMILES — keep first occurrence
+    df = df.drop_duplicates(subset=["SMILES"], keep="first")
 
     # FOM1 CSVs only contain SMILES + target — need descriptors
     if target_name.startswith("FOM1"):
         # Borrow descriptors from Density_40C (guaranteed to be in shared set)
         desc_path = os.path.join(data_dir, "Density_40C_g_cm^3_cleaned.csv")
         df_desc = pd.read_csv(desc_path)
+        df_desc = df_desc.drop_duplicates(subset=["SMILES"], keep="first")
         # Keep only SMILES + descriptor columns (drop the Density target)
         desc_cols = [c for c in df_desc.columns if c != "Density_40C_g_cm^3"]
         df_desc = df_desc[desc_cols]
