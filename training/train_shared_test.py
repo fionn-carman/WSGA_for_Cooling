@@ -178,6 +178,8 @@ def merge_auxiliary_feature(df, data_dir, aux_target, shared_smiles):
     df_aux = df_aux.rename(columns={aux_target: aux_col_name})
 
     n_before = len(df)
+    # Deduplicate auxiliary source to prevent row multiplication
+    df_aux = df_aux.drop_duplicates(subset=["SMILES"], keep="first")
     df = df.merge(df_aux, on="SMILES", how="inner")
     logger.info(f"  Auxiliary feature {aux_target}: {n_before} -> {len(df)} samples")
     return df, aux_col_name
@@ -658,13 +660,12 @@ def compute_fom1_from_predictions(test_predictions):
     common_smiles = sorted(smiles_sets[0].intersection(*smiles_sets[1:]))
     df = pd.DataFrame({"SMILES": common_smiles})
 
-    # Merge each thermophysical prediction
+    # Merge each thermophysical prediction (deduplicate to avoid row explosion)
     for target in THERMO_TARGETS:
         pred_df = test_predictions[target]
-        df = df.merge(
-            pred_df[["SMILES", "y_pred"]].rename(columns={"y_pred": target}),
-            on="SMILES", how="inner",
-        )
+        pred_slice = pred_df[["SMILES", "y_pred"]].rename(columns={"y_pred": target})
+        pred_slice = pred_slice.drop_duplicates(subset=["SMILES"], keep="first")
+        df = df.merge(pred_slice, on="SMILES", how="inner")
 
     # Molecular weight for Cp conversion
     df["MW"] = df["SMILES"].apply(
@@ -707,6 +708,13 @@ def compute_fom1_from_predictions(test_predictions):
         ** 0.2813
     )
 
+    # Drop rows where computed FOM1 is NaN (e.g. negative base raised to
+    # fractional power when predicted beta or other quantities are unphysical)
+    n_before = len(df)
+    df = df.dropna(subset=["FOM1_computed_40", "FOM1_computed_100"])
+    n_dropped = n_before - len(df)
+    if n_dropped:
+        logger.warning(f"  Dropped {n_dropped}/{n_before} rows with NaN computed FOM1")
     logger.info(f"  Computed FOM1 for {len(df)} test molecules")
     return df
 
@@ -718,19 +726,18 @@ def compare_fom1(computed_df, test_predictions, output_dir):
     """
     output_dir = Path(output_dir)
 
-    # Merge direct predictions
+    # Merge direct predictions (deduplicate to avoid row explosion)
     df = computed_df.copy()
     for suffix, target_name in [("40", "FOM1_exp_40"), ("100", "FOM1_exp_100")]:
         if target_name not in test_predictions:
             logger.warning(f"  Missing direct predictions for {target_name}")
             continue
         pred_df = test_predictions[target_name]
-        df = df.merge(
-            pred_df[["SMILES", "y_true", "y_pred"]].rename(
-                columns={"y_true": f"FOM1_true_{suffix}",
-                          "y_pred": f"FOM1_direct_{suffix}"}),
-            on="SMILES", how="inner",
-        )
+        pred_slice = pred_df[["SMILES", "y_true", "y_pred"]].rename(
+            columns={"y_true": f"FOM1_true_{suffix}",
+                      "y_pred": f"FOM1_direct_{suffix}"})
+        pred_slice = pred_slice.drop_duplicates(subset=["SMILES"], keep="first")
+        df = df.merge(pred_slice, on="SMILES", how="inner")
 
     df.to_csv(output_dir / "fom1_comparison.csv", index=False)
     logger.info(f"  Saved fom1_comparison.csv ({len(df)} molecules)")
@@ -749,15 +756,19 @@ def compare_fom1(computed_df, test_predictions, output_dir):
         if true_col not in df.columns:
             continue
 
-        direct_r2 = r2_score(df[true_col], df[direct_col])
-        direct_rmse = math.sqrt(mean_squared_error(df[true_col], df[direct_col]))
-        direct_mae = mean_absolute_error(df[true_col], df[direct_col])
+        # Drop any remaining NaN for safety
+        valid = df[[true_col, direct_col, computed_col]].dropna()
+        n_valid = len(valid)
 
-        computed_r2 = r2_score(df[true_col], df[computed_col])
-        computed_rmse = math.sqrt(mean_squared_error(df[true_col], df[computed_col]))
-        computed_mae = mean_absolute_error(df[true_col], df[computed_col])
+        direct_r2 = r2_score(valid[true_col], valid[direct_col])
+        direct_rmse = math.sqrt(mean_squared_error(valid[true_col], valid[direct_col]))
+        direct_mae = mean_absolute_error(valid[true_col], valid[direct_col])
 
-        summary_lines.append(f"\nFOM1 at {temp}C (n={len(df)}):")
+        computed_r2 = r2_score(valid[true_col], valid[computed_col])
+        computed_rmse = math.sqrt(mean_squared_error(valid[true_col], valid[computed_col]))
+        computed_mae = mean_absolute_error(valid[true_col], valid[computed_col])
+
+        summary_lines.append(f"\nFOM1 at {temp}C (n={n_valid}):")
         summary_lines.append(f"  Direct model:     R2={direct_r2:.4f}  RMSE={direct_rmse:.4f}  MAE={direct_mae:.4f}")
         summary_lines.append(f"  From thermo preds: R2={computed_r2:.4f}  RMSE={computed_rmse:.4f}  MAE={computed_mae:.4f}")
 
@@ -778,18 +789,21 @@ def compare_fom1(computed_df, test_predictions, output_dir):
         if true_col not in df.columns:
             continue
 
+        # Filter to valid (non-NaN) rows for plotting
+        plot_df = df[[true_col, direct_col, computed_col]].dropna()
+
         ax = axes[ax_idx]
-        ax.scatter(df[true_col], df[direct_col], alpha=0.6, s=40,
+        ax.scatter(plot_df[true_col], plot_df[direct_col], alpha=0.6, s=40,
                    label="Direct model", color="#1f77b4")
-        ax.scatter(df[true_col], df[computed_col], alpha=0.6, s=40,
+        ax.scatter(plot_df[true_col], plot_df[computed_col], alpha=0.6, s=40,
                    marker="^", label="From thermo", color="#ff7f0e")
 
-        lo = min(df[true_col].min(), df[direct_col].min(), df[computed_col].min())
-        hi = max(df[true_col].max(), df[direct_col].max(), df[computed_col].max())
+        lo = min(plot_df[true_col].min(), plot_df[direct_col].min(), plot_df[computed_col].min())
+        hi = max(plot_df[true_col].max(), plot_df[direct_col].max(), plot_df[computed_col].max())
         ax.plot([lo, hi], [lo, hi], "r--", lw=2, label="Perfect fit")
 
-        dr2 = r2_score(df[true_col], df[direct_col])
-        cr2 = r2_score(df[true_col], df[computed_col])
+        dr2 = r2_score(plot_df[true_col], plot_df[direct_col])
+        cr2 = r2_score(plot_df[true_col], plot_df[computed_col])
         ax.set_xlabel("True FOM1", fontsize=12)
         ax.set_ylabel("Predicted FOM1", fontsize=12)
         ax.set_title(f"FOM1 at {temp}\u00b0C", fontsize=14)
