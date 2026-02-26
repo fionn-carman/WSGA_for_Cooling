@@ -6,6 +6,16 @@ parameters from Stage 1 and sweeps tau across a broad range.
 
 Directory format: tau{}_seed{}
 
+All analysis uses `all_evaluated_molecules.csv` as the single source of
+truth.  Molecules are filtered to those that:
+  - pass all hard constraints  (is_valid == 1)
+  - have positive fitness      (FitnessScore > 0)
+  - pass the MP threshold      (MP-Measured < -30 °C)
+
+This guarantees that the convergence curves, FOM1-vs-tau plot, top-10
+plot, and top-molecules table are all derived from the same data and
+the same filtering logic.
+
 Figures generated:
   1. FOM1 vs tau (mean +/- std across seeds)
   2. Convergence curves per tau value
@@ -58,21 +68,56 @@ def safe_read_csv(path):
         return None
 
 
-def load_top_molecules(run_path):
-    """Load the final top-25 CSV from a run directory."""
-    candidates = [f for f in os.listdir(run_path)
-                  if f.startswith("top_") and f.endswith(".csv")]
-    if not candidates:
-        return None
-    return safe_read_csv(os.path.join(run_path, candidates[0]))
+def load_all_evaluated(run_path, mp_hard=-30):
+    """Load all_evaluated_molecules.csv and filter to valid, MP-passing molecules.
 
+    Filters to molecules that:
+      - pass all hard constraints  (is_valid == 1)
+      - have positive fitness      (FitnessScore > 0)
+      - pass the MP threshold      (MP-Measured < mp_hard, default −30 °C)
 
-def load_generation_stats(run_path):
-    """Load generation_stats.csv from a run directory."""
-    path = os.path.join(run_path, "generation_stats.csv")
+    Returns the filtered DataFrame (sorted by FOM1_avg descending) or None.
+    """
+    path = os.path.join(run_path, "all_evaluated_molecules.csv")
     if not os.path.exists(path):
         return None
-    return safe_read_csv(path)
+    df = safe_read_csv(path)
+    if df is None:
+        return None
+
+    mask = pd.Series(True, index=df.index)
+    if "is_valid" in df.columns:
+        mask &= (df["is_valid"] == 1)
+    if "FitnessScore" in df.columns:
+        mask &= (df["FitnessScore"] > 0)
+    if "MP-Measured" in df.columns:
+        mask &= (df["MP-Measured"] < mp_hard)
+
+    df = df.loc[mask].copy()
+    if df.empty:
+        return None
+
+    df = df.sort_values("FOM1_avg", ascending=False)
+    return df
+
+
+def get_convergence_curve(valid_df):
+    """Compute per-generation best valid FOM1 (cumulative max).
+
+    Parameters
+    ----------
+    valid_df : pd.DataFrame
+        Already filtered to valid, MP-passing molecules.  Must contain
+        'generation' and 'FOM1_avg' columns.
+
+    Returns
+    -------
+    pd.Series  (index = generation, values = running-best FOM1_avg)
+    """
+    best_per_gen = valid_df.groupby("generation")["FOM1_avg"].max()
+    best_per_gen = best_per_gen.sort_index()
+    running_best = best_per_gen.cummax()
+    return running_best
 
 
 # ======================================================================
@@ -130,7 +175,12 @@ def plot_top10_vs_tau(runs_df, out_dir):
 
 
 def plot_convergence_by_tau(runs_df, sweep_dir, out_dir):
-    """Convergence curves grouped by tau, averaged over seeds."""
+    """Convergence curves grouped by tau, averaged over seeds.
+
+    Uses all_evaluated_molecules.csv filtered to valid, MP-passing
+    molecules.  Per-generation running-best FOM1_avg is computed for
+    each seed, then averaged across seeds per tau.
+    """
     tau_values = sorted(runs_df["tau"].unique())
     fig, ax = plt.subplots(figsize=(10, 6))
     cmap = plt.cm.viridis
@@ -140,33 +190,36 @@ def plot_convergence_by_tau(runs_df, sweep_dir, out_dir):
         mask = runs_df["tau"] == tau_val
         seed_dirs = runs_df.loc[mask, "dir"].tolist()
 
-        all_gen_fitness = []
+        all_curves = []
         for d in seed_dirs:
-            gs = load_generation_stats(os.path.join(sweep_dir, d))
-            if gs is None:
+            valid_df = load_all_evaluated(os.path.join(sweep_dir, d))
+            if valid_df is None:
                 continue
-            if "FitnessScore_max" in gs.columns:
-                all_gen_fitness.append(gs.set_index("generation")["FitnessScore_max"])
+            curve = get_convergence_curve(valid_df)
+            all_curves.append(curve)
 
-        if not all_gen_fitness:
+        if not all_curves:
             continue
 
-        combined = pd.concat(all_gen_fitness, axis=1)
+        combined = pd.concat(all_curves, axis=1)
+        # Forward-fill so seeds that converge early carry their best value
+        combined = combined.ffill()
         mean_curve = combined.mean(axis=1)
         std_curve = combined.std(axis=1)
 
         color = cmap(norm(tau_val))
         ax.plot(mean_curve.index, mean_curve.values,
                 label=f"τ={tau_val}", color=color, linewidth=2)
-        if len(all_gen_fitness) > 1:
+        if len(all_curves) > 1:
             ax.fill_between(mean_curve.index,
                             (mean_curve - std_curve).values,
                             (mean_curve + std_curve).values,
                             alpha=0.12, color=color)
 
     ax.set_xlabel("Generation", fontsize=12)
-    ax.set_ylabel("Best Fitness Score", fontsize=12)
-    ax.set_title("Convergence Curves by Niching Threshold (τ)", fontsize=14)
+    ax.set_ylabel("Best Valid FOM1 (avg)", fontsize=12)
+    ax.set_title("Convergence Curves by Niching Threshold (τ)\n"
+                 "(valid molecules only, MP ≤ −30 °C)", fontsize=14)
     ax.legend(fontsize=9, loc="lower right")
     ax.tick_params(labelsize=10)
 
@@ -178,7 +231,7 @@ def plot_convergence_by_tau(runs_df, sweep_dir, out_dir):
 
 
 def plot_diversity_vs_tau(runs_df, sweep_dir, out_dir, n_mols=25):
-    """Structural diversity (mean pairwise Tanimoto) of top molecules per tau level."""
+    """Structural diversity (mean pairwise Tanimoto) of top valid molecules per tau level."""
     try:
         from rdkit import Chem
         from rdkit.Chem import AllChem, DataStructs
@@ -195,12 +248,14 @@ def plot_diversity_vs_tau(runs_df, sweep_dir, out_dir, n_mols=25):
 
         for _, run in tau_runs.iterrows():
             run_path = os.path.join(sweep_dir, run["dir"])
-            top_df = load_top_molecules(run_path)
-            if top_df is None:
+            valid_df = load_all_evaluated(run_path)
+            if valid_df is None:
                 continue
 
-            smiles_col = "CanonicalSMILES" if "CanonicalSMILES" in top_df.columns else "SMILES"
-            smiles_list = top_df.head(n_mols)[smiles_col].tolist()
+            smiles_col = "CanonicalSMILES" if "CanonicalSMILES" in valid_df.columns else "SMILES"
+            # Deduplicate and take top n_mols by FOM1_avg (already sorted)
+            top_df = valid_df.drop_duplicates(subset=[smiles_col]).head(n_mols)
+            smiles_list = top_df[smiles_col].tolist()
 
             fps = []
             for smi in smiles_list:
@@ -259,7 +314,7 @@ def plot_diversity_vs_tau(runs_df, sweep_dir, out_dir, n_mols=25):
 
 
 def plot_scaffold_count_vs_tau(runs_df, sweep_dir, out_dir, n_mols=25):
-    """Number of unique Murcko scaffolds in top molecules per tau level."""
+    """Number of unique Murcko scaffolds in top valid molecules per tau level."""
     try:
         from rdkit import Chem
         from rdkit.Chem.Scaffolds import MurckoScaffold
@@ -276,12 +331,14 @@ def plot_scaffold_count_vs_tau(runs_df, sweep_dir, out_dir, n_mols=25):
 
         for _, run in tau_runs.iterrows():
             run_path = os.path.join(sweep_dir, run["dir"])
-            top_df = load_top_molecules(run_path)
-            if top_df is None:
+            valid_df = load_all_evaluated(run_path)
+            if valid_df is None:
                 continue
 
-            smiles_col = "CanonicalSMILES" if "CanonicalSMILES" in top_df.columns else "SMILES"
-            smiles_list = top_df.head(n_mols)[smiles_col].tolist()
+            smiles_col = "CanonicalSMILES" if "CanonicalSMILES" in valid_df.columns else "SMILES"
+            # Deduplicate and take top n_mols by FOM1_avg (already sorted)
+            top_df = valid_df.drop_duplicates(subset=[smiles_col]).head(n_mols)
+            smiles_list = top_df[smiles_col].tolist()
 
             scaffolds = set()
             for smi in smiles_list:
@@ -333,7 +390,7 @@ def plot_scaffold_count_vs_tau(runs_df, sweep_dir, out_dir, n_mols=25):
 def analyse_tau_sweep(sweep_dir, top_n_molecules=50):
 
     # ------------------------------------------------------------------
-    # 1. Scan all run directories
+    # 1. Scan all run directories — use all_evaluated_molecules.csv
     # ------------------------------------------------------------------
     runs = []
     skipped = 0
@@ -345,23 +402,29 @@ def analyse_tau_sweep(sweep_dir, top_n_molecules=50):
         if params is None:
             continue
 
-        top_df = load_top_molecules(run_path)
-        if top_df is None:
+        valid_df = load_all_evaluated(run_path)
+        if valid_df is None:
             skipped += 1
             continue
 
-        best = top_df.iloc[0]
-        top10 = top_df.head(10)
+        smiles_col = "CanonicalSMILES" if "CanonicalSMILES" in valid_df.columns else "SMILES"
+
+        # Deduplicate by SMILES within this run (keep best FOM1_avg)
+        unique_df = valid_df.drop_duplicates(subset=[smiles_col], keep="first")
+
+        best = unique_df.iloc[0]
+        top10 = unique_df.head(10)
 
         run_info = {
             **params,
             "dir": dirname,
-            "best_FOM1_avg": best.get("FOM1_avg", np.nan),
+            "best_FOM1_avg": best["FOM1_avg"],
             "best_FOM1_40": best.get("FOM1_40", np.nan),
             "best_FOM1_100": best.get("FOM1_100", np.nan),
             "best_fitness": best.get("FitnessScore", np.nan),
-            "best_smiles": best.get("SMILES", best.get("CanonicalSMILES", "")),
-            "top10_mean_FOM1_avg": top10["FOM1_avg"].mean() if "FOM1_avg" in top10.columns else np.nan,
+            "best_smiles": best.get(smiles_col, ""),
+            "top10_mean_FOM1_avg": top10["FOM1_avg"].mean(),
+            "n_valid_molecules": len(unique_df),
         }
 
         runs.append(run_info)
@@ -371,7 +434,8 @@ def analyse_tau_sweep(sweep_dir, top_n_molecules=50):
         return
 
     runs_df = pd.DataFrame(runs)
-    print(f"Found {len(runs_df)} completed runs (skipped {skipped} incomplete)\n")
+    print(f"Found {len(runs_df)} completed runs (skipped {skipped} incomplete)")
+    print(f"  [Using all_evaluated_molecules.csv filtered to is_valid=1, FitnessScore>0, MP<-30°C]\n")
 
     # ------------------------------------------------------------------
     # 2. Summary table
@@ -385,7 +449,7 @@ def analyse_tau_sweep(sweep_dir, top_n_molecules=50):
     ).sort_index()
 
     print(f"{'='*80}")
-    print(f"  TAU SWEEP RESULTS")
+    print(f"  TAU SWEEP RESULTS  (valid molecules only, MP ≤ −30 °C)")
     print(f"{'='*80}\n")
 
     print(f"{'Tau':<8} {'#1 FOM1_avg':>18}   {'Top10 FOM1_avg':>18}   {'Seeds':>5}")
@@ -399,29 +463,28 @@ def analyse_tau_sweep(sweep_dir, top_n_molecules=50):
               f"   {int(row['n_seeds']):>5}")
 
     # ------------------------------------------------------------------
-    # 3. Best unique molecules
+    # 3. Best unique molecules across all runs
     # ------------------------------------------------------------------
-    all_top_mols = []
+    all_valid_mols = []
     for _, run in runs_df.iterrows():
         run_path = os.path.join(sweep_dir, run["dir"])
-        top_df = load_top_molecules(run_path)
-        if top_df is None:
+        valid_df = load_all_evaluated(run_path)
+        if valid_df is None:
             continue
-        top_df = top_df.copy()
-        top_df["source_tau"] = run["tau"]
-        top_df["source_seed"] = run["seed"]
-        all_top_mols.append(top_df)
+        valid_df = valid_df.copy()
+        valid_df["source_tau"] = run["tau"]
+        valid_df["source_seed"] = run["seed"]
+        all_valid_mols.append(valid_df)
 
-    if all_top_mols:
-        combined = pd.concat(all_top_mols, ignore_index=True)
+    if all_valid_mols:
+        combined = pd.concat(all_valid_mols, ignore_index=True)
         smiles_col = "CanonicalSMILES" if "CanonicalSMILES" in combined.columns else "SMILES"
-        sort_col = "FOM1_avg" if "FOM1_avg" in combined.columns else "FitnessScore"
-        combined = combined.sort_values(sort_col, ascending=False)
+        combined = combined.sort_values("FOM1_avg", ascending=False)
         unique = combined.drop_duplicates(subset=[smiles_col], keep="first")
         top_unique = unique.head(top_n_molecules)
 
         print(f"\n{'='*100}")
-        print(f"  TOP {top_n_molecules} UNIQUE MOLECULES ({len(unique)} unique total)")
+        print(f"  TOP {top_n_molecules} UNIQUE VALID MOLECULES ({len(unique)} unique total)")
         print(f"{'='*100}\n")
 
         print(f"{'Rank':<5} {'SMILES':<45} {'FOM1_avg':>10} {'FOM1_40':>10} "
@@ -449,7 +512,7 @@ def analyse_tau_sweep(sweep_dir, top_n_molecules=50):
     runs_df.to_csv(os.path.join(out_dir, "all_runs.csv"), index=False)
     agg.to_csv(os.path.join(out_dir, "tau_summary.csv"))
 
-    if all_top_mols:
+    if all_valid_mols:
         top_unique.to_csv(os.path.join(out_dir, "top_molecules.csv"), index=False)
 
     print(f"\nCSVs saved to: {out_dir}/")
