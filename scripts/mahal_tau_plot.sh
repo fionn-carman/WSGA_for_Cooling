@@ -2,8 +2,8 @@
 #PBS -N wsga_mahal_plot
 #PBS -l walltime=06:00:00
 #PBS -l select=1:ncpus=1:mem=64gb
-#PBS -o /dev/null
-#PBS -e /dev/null
+#PBS -o mahal_plot_stdout.log
+#PBS -e mahal_plot_stderr.log
 
 # ============================================================
 # Mahalanobis Distance — Tau Comparison Plotting
@@ -125,24 +125,16 @@ echo "" >> "$log_file"
 echo "=== Step 2: Chemical space + OOD plots ===" >> "$log_file"
 echo "" >> "$log_file"
 
-if [ -f "$NPZ_CACHE" ]; then
-    echo "  Using existing NPZ cache (fast replot mode)" >> "$log_file"
-    python3 plot_tau_chemical_space.py \
-        --npz "$NPZ_CACHE" \
-        --mahal_csv "$COMBINED_CSV" \
-        --out_dir "$OUTPUT_DIR" \
-        2>&1 | tee -a "$log_file"
-else
-    echo "  No NPZ cache found — computing UMAP from scratch" >> "$log_file"
-    python3 plot_tau_chemical_space.py \
-        --sweep_dir "$SWEEP_DIR" \
-        --ref_csv "$REF_CSV" \
-        --mahal_csv "$COMBINED_CSV" \
-        --out_dir "$OUTPUT_DIR" \
-        --n_top 50 \
-        --sample_ga 50000 \
-        2>&1 | tee -a "$log_file"
-fi
+echo "  Computing UMAP from scratch (--no_cache)" >> "$log_file"
+python3 plot_tau_chemical_space.py \
+    --sweep_dir "$SWEEP_DIR" \
+    --ref_csv "$REF_CSV" \
+    --mahal_csv "$COMBINED_CSV" \
+    --out_dir "$OUTPUT_DIR" \
+    --n_top 50 \
+    --sample_per_tau 50000 \
+    --no_cache \
+    2>&1 | tee -a "$log_file"
 
 step2_status=$?
 

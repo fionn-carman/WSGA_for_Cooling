@@ -60,7 +60,7 @@ def safe_read_csv(path):
     try:
         if os.path.getsize(path) == 0:
             return None
-        df = pd.read_csv(path)
+        df = pd.read_csv(path, low_memory=False)
         if df.empty or len(df.columns) < 2:
             return None
         return df

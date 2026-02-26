@@ -74,6 +74,8 @@ from plot_chemical_space import (
     detect_functional_groups, smiles_to_fingerprint, fps_to_numpy,
     load_reference_set, _save_fig, FUNCTIONAL_GROUPS, FG_SHORT_NAMES,
     _robust_axis_limits, _add_invisible_colorbar, _add_side_colorbar,
+    _apply_axis_limits, _build_fg_colour_map, _draw_panel_a,
+    _draw_panel_validity, assign_dominant_fg,
     PANEL_SIZE,
 )
 
@@ -128,11 +130,12 @@ def parse_tau_dir(dirname):
     return {"tau": float(m.group(1)), "seed": int(m.group(2))}
 
 
-def load_all_tau_molecules(sweep_dir, sample_ga=50000):
+def load_all_tau_molecules(sweep_dir, sample_per_tau=50000):
     """Load all_evaluated_molecules.csv from every tau/seed dir.
 
     Tags each molecule with its tau value and seed.
-    Caps total molecules at sample_ga with stratified sampling by (tau, generation).
+    Caps molecules at *sample_per_tau* per tau value (stratified by
+    generation within each tau) so that every tau panel has equal weight.
 
     Returns:
         ga_df: DataFrame with SMILES, generation, fitness, tau, seed columns
@@ -152,7 +155,7 @@ def load_all_tau_molecules(sweep_dir, sample_ga=50000):
             continue
 
         try:
-            df = pd.read_csv(eval_path)
+            df = pd.read_csv(eval_path, low_memory=False)
             if df.empty:
                 continue
             df["tau"] = params["tau"]
@@ -175,22 +178,31 @@ def load_all_tau_molecules(sweep_dir, sample_ga=50000):
     print(f"  Loaded {len(combined)} molecules across {len(tau_values)} tau values, "
           f"{combined['seed'].nunique()} seeds")
 
-    # Stratified sampling by (tau, generation) to keep balanced representation
-    if sample_ga > 0 and len(combined) > sample_ga:
-        print(f"  Sampling {sample_ga} from {len(combined)} (stratified by tau + generation)...")
-        if "generation" in combined.columns:
-            combined["_strat"] = combined["tau"].astype(str) + "_" + combined["generation"].astype(str)
-            combined = combined.groupby("_strat", group_keys=False).apply(
-                lambda g: g.sample(
-                    n=min(len(g), max(1, int(sample_ga * len(g) / len(combined)))),
-                    random_state=42
-                )
-            ).reset_index(drop=True)
-            combined.drop(columns=["_strat"], inplace=True)
-            if len(combined) > sample_ga:
-                combined = combined.sample(n=sample_ga, random_state=42)
-        else:
-            combined = combined.sample(n=sample_ga, random_state=42)
+    # Stratified sampling: sample_per_tau molecules per tau value,
+    # stratified by generation within each tau to keep balanced temporal coverage.
+    if sample_per_tau > 0:
+        sampled_frames = []
+        for tv in tau_values:
+            tau_df = combined[combined["tau"] == tv]
+            if len(tau_df) <= sample_per_tau:
+                sampled_frames.append(tau_df)
+            elif "generation" in tau_df.columns:
+                tau_df = tau_df.copy()
+                tau_df["_gen_str"] = tau_df["generation"].astype(str)
+                n_total = len(tau_df)
+                tau_df = tau_df.groupby("_gen_str", group_keys=False).apply(
+                    lambda g: g.sample(
+                        n=min(len(g), max(1, int(sample_per_tau * len(g) / n_total))),
+                        random_state=42
+                    )
+                ).reset_index(drop=True)
+                tau_df.drop(columns=["_gen_str"], inplace=True)
+                if len(tau_df) > sample_per_tau:
+                    tau_df = tau_df.sample(n=sample_per_tau, random_state=42)
+                sampled_frames.append(tau_df)
+            else:
+                sampled_frames.append(tau_df.sample(n=sample_per_tau, random_state=42))
+        combined = pd.concat(sampled_frames, ignore_index=True)
 
     print(f"  Final dataset: {len(combined)} molecules")
     for tv in tau_values:
@@ -208,12 +220,15 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
     """Compute shared UMAP across reference + all tau GA molecules.
 
     Returns:
-        coords_2d, labels, generations, fitness, tau_arr, valid_smiles
+        coords_2d, labels, generations, fitness, tau_arr, valid_smiles,
+        is_valid, dominant_fgs
     """
     # Check cache
     if not no_cache and os.path.exists(cache_path):
         print(f"  Loading cached UMAP from {os.path.abspath(cache_path)}...")
         data = np.load(cache_path, allow_pickle=True)
+        is_valid = data["is_valid"] if "is_valid" in data else None
+        dominant_fgs = data["dominant_fgs"] if "dominant_fgs" in data else None
         return (
             data["coords_2d"],
             data["labels"],
@@ -221,16 +236,19 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
             data["fitness"],
             data["tau_values"],
             data["smiles"].tolist(),
+            is_valid,
+            dominant_fgs,
         )
 
     smiles_col = "SMILES"
     fom_col = "FOM1_avg" if "FOM1_avg" in ga_df.columns else "FitnessScore"
+    has_valid_col = "is_valid" in ga_df.columns
 
     # Identify top molecules per tau (only fully valid molecules)
     top_smiles_set = set()
     for tau_val in ga_df["tau"].unique():
         tau_subset = ga_df[ga_df["tau"] == tau_val]
-        if "is_valid" in tau_subset.columns:
+        if has_valid_col:
             tau_subset = tau_subset[tau_subset["is_valid"] == 1]
         if "FitnessScore" in tau_subset.columns:
             tau_subset = tau_subset[tau_subset["FitnessScore"] > 0]
@@ -243,6 +261,7 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
     all_generations = []
     all_fitness = []
     all_tau = []
+    all_is_valid = []
 
     for smi in ref_smiles:
         all_smiles.append(smi)
@@ -250,6 +269,7 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
         all_generations.append(-1)
         all_fitness.append(0)
         all_tau.append(-1.0)
+        all_is_valid.append(-1)  # not applicable for reference
 
     for _, row in ga_df.iterrows():
         smi = row.get(smiles_col)
@@ -260,6 +280,7 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
         all_generations.append(row.get("generation", 0))
         all_fitness.append(row.get(fom_col, 0))
         all_tau.append(row.get("tau", -1.0))
+        all_is_valid.append(int(row["is_valid"]) if has_valid_col else -1)
 
     # Top molecules as separate layer
     for smi in top_smiles_set:
@@ -267,6 +288,7 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
         all_labels.append("top")
         all_generations.append(-1)
         all_fitness.append(0)
+        all_is_valid.append(-1)
         # Find the tau for this top molecule
         match = ga_df[ga_df[smiles_col] == smi]
         if len(match) > 0:
@@ -288,6 +310,7 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
     generations = np.array([all_generations[i] for i in valid_indices], dtype=float)
     fitness = np.array([all_fitness[i] for i in valid_indices], dtype=float)
     tau_arr = np.array([all_tau[i] for i in valid_indices], dtype=float)
+    is_valid = np.array([all_is_valid[i] for i in valid_indices], dtype=np.int8)
     valid_smiles = [all_smiles[i] for i in valid_indices]
 
     print(f"  Valid fingerprints: {len(fps)} / {len(all_smiles)}")
@@ -309,6 +332,10 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
     coords_2d = reducer.fit_transform(fp_matrix)
     print(f"  UMAP complete: {coords_2d.shape}")
 
+    # Assign dominant functional groups
+    print(f"  Assigning functional groups for {len(valid_smiles)} molecules...")
+    dominant_fgs, _ = assign_dominant_fg(valid_smiles)
+
     # Save cache
     os.makedirs(os.path.dirname(os.path.abspath(cache_path)), exist_ok=True)
     np.savez_compressed(
@@ -319,10 +346,12 @@ def compute_or_load_umap(ref_smiles, ga_df, cache_path, no_cache=False, n_top=50
         fitness=fitness,
         tau_values=tau_arr,
         smiles=np.array(valid_smiles, dtype=object),
+        is_valid=is_valid,
+        dominant_fgs=dominant_fgs,
     )
     print(f"  Cached UMAP to {os.path.abspath(cache_path)}")
 
-    return coords_2d, labels, generations, fitness, tau_arr, valid_smiles
+    return coords_2d, labels, generations, fitness, tau_arr, valid_smiles, is_valid, dominant_fgs
 
 
 # ======================================================================
@@ -597,6 +626,157 @@ def plot_tau_standalone_generations(coords_2d, labels, tau_arr, generations,
 
         tau_str = f"{tau_val:.2f}".replace(".", "")
         _save_fig(fig, out_dir, f"tau_{tau_str}_generations", dpi)
+
+
+# ----------------------------------------------------------------------
+# NEW: Per-tau FG, validity panels
+# ----------------------------------------------------------------------
+
+def _build_global_fg_colour_map(dominant_fgs, labels):
+    """Build a single FG colour map from ALL molecules (reference + explored)
+    so colours are consistent across every panel."""
+    all_labels = dominant_fgs[(labels == "reference") | (labels == "explored")]
+    label_counts = Counter(all_labels)
+    return _build_fg_colour_map(label_counts), label_counts
+
+
+def plot_tau_standalone_ref_fg(coords_2d, labels, tau_arr, tau_values,
+                                valid_smiles, dominant_fgs, out_dir, dpi=300):
+    """Per-tau: reference molecules coloured by dominant functional group.
+
+    The reference set is the same on every panel (it doesn't depend on tau),
+    but having one per tau keeps the panel set complete.
+    """
+    ref_mask = labels == "reference"
+    ref_coords = coords_2d[ref_mask]
+
+    if dominant_fgs is not None:
+        ref_fg_labels = dominant_fgs[ref_mask]
+    else:
+        ref_smiles_list = [s for s, m in zip(valid_smiles, ref_mask) if m]
+        ref_fg_labels, _ = assign_dominant_fg(ref_smiles_list)
+
+    label_counts = Counter(ref_fg_labels)
+    label_to_colour = _build_fg_colour_map(label_counts)
+
+    for tau_val in tau_values:
+        fig, ax = plt.subplots(figsize=PANEL_SIZE)
+        _draw_panel_a(ax, ref_coords, ref_fg_labels, label_counts,
+                       label_to_colour, show_legend=True,
+                       all_coords=coords_2d)
+        ax.set_title(f"Reference — Functional Groups (τ = {tau_val})", fontsize=13)
+        fig.tight_layout()
+        tau_str = f"{tau_val:.2f}".replace(".", "")
+        _save_fig(fig, out_dir, f"tau_{tau_str}_ref_fg", dpi)
+
+
+def plot_tau_standalone_gen_fg(coords_2d, labels, tau_arr, tau_values,
+                                valid_smiles, dominant_fgs, out_dir, dpi=300):
+    """Per-tau: GA-generated molecules coloured by dominant functional group."""
+    # Build global colour map from all molecules for consistency
+    label_to_colour, _ = _build_global_fg_colour_map(dominant_fgs, labels)
+
+    for tau_val in tau_values:
+        tau_exp_mask = (labels == "explored") & (np.abs(tau_arr - tau_val) < 1e-6)
+        exp_coords = coords_2d[tau_exp_mask]
+
+        if dominant_fgs is not None:
+            exp_fg_labels = dominant_fgs[tau_exp_mask]
+        else:
+            exp_smiles = [s for s, m in zip(valid_smiles, tau_exp_mask) if m]
+            exp_fg_labels, _ = assign_dominant_fg(exp_smiles)
+
+        label_counts = Counter(exp_fg_labels)
+
+        fig, ax = plt.subplots(figsize=PANEL_SIZE)
+
+        # Background: reference in light grey
+        ref_mask = labels == "reference"
+        ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
+                   c="#EEEEEE", s=2, alpha=0.2, rasterized=True)
+
+        # GA molecules by FG
+        unique_labels = [lab for lab, _ in label_counts.most_common()]
+        if "Hydrocarbon only" in label_to_colour:
+            mask = exp_fg_labels == "Hydrocarbon only"
+            if mask.sum() > 0:
+                ax.scatter(exp_coords[mask, 0], exp_coords[mask, 1],
+                           c=label_to_colour.get("Hydrocarbon only", "#BBBBBB"),
+                           s=4, alpha=0.3,
+                           label=f"Hydrocarbon ({mask.sum()})", rasterized=True)
+        for lab in unique_labels:
+            if lab == "Hydrocarbon only":
+                continue
+            mask = exp_fg_labels == lab
+            if mask.sum() < 3:
+                continue
+            colour = label_to_colour.get(lab, "#999999")
+            ax.scatter(exp_coords[mask, 0], exp_coords[mask, 1],
+                       c=[colour], s=8, alpha=0.5,
+                       label=f"{lab} ({mask.sum()})", rasterized=True)
+
+        xlim, ylim = _robust_axis_limits(coords_2d)
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_title(f"GA Generated — Functional Groups (τ = {tau_val})", fontsize=13)
+        ax.legend(fontsize=11, markerscale=2, frameon=False, loc="upper right",
+                  ncol=1, handletextpad=0.3, labelspacing=0.3)
+        fig.tight_layout()
+        tau_str = f"{tau_val:.2f}".replace(".", "")
+        _save_fig(fig, out_dir, f"tau_{tau_str}_gen_fg", dpi)
+
+
+def plot_tau_standalone_validity(coords_2d, labels, tau_arr, is_valid,
+                                  tau_values, out_dir, dpi=300):
+    """Per-tau: GA molecules coloured by validity (valid / invalid)."""
+    for tau_val in tau_values:
+        tau_exp_mask = (labels == "explored") & (np.abs(tau_arr - tau_val) < 1e-6)
+        tau_top_mask = (labels == "top") & (np.abs(tau_arr - tau_val) < 1e-6)
+        ref_mask = labels == "reference"
+
+        fig, ax = plt.subplots(figsize=PANEL_SIZE)
+
+        # Reference background
+        ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
+                   c="#EEEEEE", s=2, alpha=0.2, rasterized=True)
+
+        exp_coords = coords_2d[tau_exp_mask]
+        if is_valid is not None:
+            exp_valid = is_valid[tau_exp_mask]
+            valid_mask = exp_valid == 1
+            invalid_mask = exp_valid == 0
+
+            if invalid_mask.sum() > 0:
+                ax.scatter(exp_coords[invalid_mask, 0], exp_coords[invalid_mask, 1],
+                           c="#D64545", s=3, alpha=0.2,
+                           label=f"Invalid ({invalid_mask.sum():,})", rasterized=True)
+            if valid_mask.sum() > 0:
+                ax.scatter(exp_coords[valid_mask, 0], exp_coords[valid_mask, 1],
+                           c="#2CA02C", s=3, alpha=0.2,
+                           label=f"Valid ({valid_mask.sum():,})", rasterized=True)
+        else:
+            ax.scatter(exp_coords[:, 0], exp_coords[:, 1],
+                       c="#999999", s=3, alpha=0.15,
+                       label="Explored (no validity data)", rasterized=True)
+
+        # Top molecules
+        if tau_top_mask.sum() > 0:
+            ax.scatter(coords_2d[tau_top_mask, 0], coords_2d[tau_top_mask, 1],
+                       c="red", s=30, alpha=0.9, marker="*",
+                       label=f"Top {tau_top_mask.sum()}", zorder=5)
+
+        xlim, ylim = _robust_axis_limits(coords_2d)
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_title(f"Validity (τ = {tau_val})", fontsize=13)
+        ax.legend(fontsize=12, markerscale=2, frameon=False, loc="upper right")
+        fig.tight_layout()
+        tau_str = f"{tau_val:.2f}".replace(".", "")
+        _save_fig(fig, out_dir, f"tau_{tau_str}_validity", dpi)
 
 
 # ======================================================================
@@ -1405,8 +1585,8 @@ def main():
                         help="Output directory")
     parser.add_argument("--n_top", type=int, default=50,
                         help="Top molecules to highlight per tau (default: 50)")
-    parser.add_argument("--sample_ga", type=int, default=50000,
-                        help="Max GA molecules to load (0=all, default: 50000)")
+    parser.add_argument("--sample_per_tau", type=int, default=50000,
+                        help="Max GA molecules to load per tau value (0=all, default: 50000)")
     parser.add_argument("--cache", type=str, default=None,
                         help="Path to .npz UMAP cache")
     parser.add_argument("--no_cache", action="store_true",
@@ -1460,6 +1640,8 @@ def main():
         generations = data["generations"]
         tau_arr = data["tau_values"]
         valid_smiles = data["smiles"].tolist()
+        is_valid = data["is_valid"] if "is_valid" in data else None
+        dominant_fgs = data["dominant_fgs"] if "dominant_fgs" in data else None
 
         tau_values = sorted(set(tau_arr[tau_arr >= 0]))
         print(f"  Loaded {len(labels)} points, {len(tau_values)} tau values")
@@ -1491,6 +1673,24 @@ def main():
         print("\n  --- Standalone fitness panels ---")
         plot_tau_standalone_fitness(coords_2d, labels, tau_arr, fitness,
                                     tau_values, args.out_dir, dpi=args.dpi)
+
+        if dominant_fgs is not None:
+            print("\n  --- Standalone reference FG panels ---")
+            plot_tau_standalone_ref_fg(coords_2d, labels, tau_arr, tau_values,
+                                        valid_smiles, dominant_fgs, args.out_dir, dpi=args.dpi)
+
+            print("\n  --- Standalone generated FG panels ---")
+            plot_tau_standalone_gen_fg(coords_2d, labels, tau_arr, tau_values,
+                                        valid_smiles, dominant_fgs, args.out_dir, dpi=args.dpi)
+        else:
+            print("\n  Skipping FG panels (no dominant_fgs in cache — rerun with --no_cache)")
+
+        if is_valid is not None:
+            print("\n  --- Standalone validity panels ---")
+            plot_tau_standalone_validity(coords_2d, labels, tau_arr, is_valid,
+                                          tau_values, args.out_dir, dpi=args.dpi)
+        else:
+            print("\n  Skipping validity panels (no is_valid in cache — rerun with --no_cache)")
 
         # OOD panels (if Mahalanobis CSV provided)
         if args.mahal_csv is not None:
@@ -1569,7 +1769,7 @@ def main():
     print("  STEP 2: Load tau sweep molecules")
     print("=" * 60)
 
-    ga_df, tau_values = load_all_tau_molecules(args.sweep_dir, sample_ga=args.sample_ga)
+    ga_df, tau_values = load_all_tau_molecules(args.sweep_dir, sample_per_tau=args.sample_per_tau)
 
     # ==================================================================
     # 3. Compute shared UMAP
@@ -1578,7 +1778,8 @@ def main():
     print("  STEP 3: Compute shared UMAP embedding")
     print("=" * 60)
 
-    coords_2d, labels, generations, fitness, tau_arr, valid_smiles = \
+    coords_2d, labels, generations, fitness, tau_arr, valid_smiles, \
+        is_valid, dominant_fgs = \
         compute_or_load_umap(
             ref_smiles, ga_df, args.cache,
             no_cache=args.no_cache, n_top=args.n_top,
@@ -1614,6 +1815,18 @@ def main():
     print("\n  --- Standalone fitness panels ---")
     plot_tau_standalone_fitness(coords_2d, labels, tau_arr, fitness,
                                 tau_values, args.out_dir, dpi=args.dpi)
+
+    print("\n  --- Standalone reference FG panels ---")
+    plot_tau_standalone_ref_fg(coords_2d, labels, tau_arr, tau_values,
+                                valid_smiles, dominant_fgs, args.out_dir, dpi=args.dpi)
+
+    print("\n  --- Standalone generated FG panels ---")
+    plot_tau_standalone_gen_fg(coords_2d, labels, tau_arr, tau_values,
+                                valid_smiles, dominant_fgs, args.out_dir, dpi=args.dpi)
+
+    print("\n  --- Standalone validity panels ---")
+    plot_tau_standalone_validity(coords_2d, labels, tau_arr, is_valid,
+                                  tau_values, args.out_dir, dpi=args.dpi)
 
     # OOD panels (if Mahalanobis CSV provided)
     if args.mahal_csv is not None:
