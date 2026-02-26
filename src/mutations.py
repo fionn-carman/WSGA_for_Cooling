@@ -1084,18 +1084,15 @@ def Esterify(StartingMolecule, InsertStyle, showdiff=True, Verbose=False):
     return Mut_Mol, MutMolSMILES
 
 def Generate_Glycol_Chain(ChainLength):
-    if ChainLength < 1:
-        raise ValueError("Repeat count must be at least 1")
-    
-    # Start with 'COC' and join subsequent units by removing the leading 'C' from each unit
-    return "COC" + "OC" * (ChainLength - 1)
+    """Generate ethylene glycol (PEG) chain: -O-CH2CH2-O-CH2CH2-O- pattern.
 
-def Generate_Glycol_Chain(ChainLength):
+    ChainLength=1 -> COCC        (one -O-CH2CH2- unit)
+    ChainLength=2 -> COCCOCC     (two units)
+    ChainLength=3 -> COCCOCCOC   (three units, capped)
+    """
     if ChainLength < 1:
         raise ValueError("Repeat count must be at least 1")
-    
-    # Start with 'COC' and join subsequent units by removing the leading 'C' from each unit
-    return "COC" + "OC" * (ChainLength - 1)
+    return "COCC" + "OCC" * (ChainLength - 1)
 
 def Glycolate(StartingMolecule, InsertStyle, showdiff=True, Verbose=False):
     StartingMoleculeUnedited = StartingMolecule

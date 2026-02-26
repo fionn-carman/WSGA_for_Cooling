@@ -73,6 +73,7 @@ except (ImportError, RuntimeError):
 from plot_chemical_space import (
     detect_functional_groups, smiles_to_fingerprint, fps_to_numpy,
     load_reference_set, _save_fig, FUNCTIONAL_GROUPS, FG_SHORT_NAMES,
+    FIXED_FG_COLOURS,
     _robust_axis_limits, _add_invisible_colorbar, _add_side_colorbar,
     _apply_axis_limits, _build_fg_colour_map, _draw_panel_a,
     _draw_panel_validity, assign_dominant_fg,
@@ -640,13 +641,8 @@ def _build_global_fg_colour_map(dominant_fgs, labels):
     return _build_fg_colour_map(label_counts), label_counts
 
 
-def plot_tau_standalone_ref_fg(coords_2d, labels, tau_arr, tau_values,
-                                valid_smiles, dominant_fgs, out_dir, dpi=300):
-    """Per-tau: reference molecules coloured by dominant functional group.
-
-    The reference set is the same on every panel (it doesn't depend on tau),
-    but having one per tau keeps the panel set complete.
-    """
+def _prepare_ref_fg_data(coords_2d, labels, valid_smiles, dominant_fgs):
+    """Pre-compute reference FG labels and colour map (shared across panels)."""
     ref_mask = labels == "reference"
     ref_coords = coords_2d[ref_mask]
 
@@ -658,16 +654,120 @@ def plot_tau_standalone_ref_fg(coords_2d, labels, tau_arr, tau_values,
 
     label_counts = Counter(ref_fg_labels)
     label_to_colour = _build_fg_colour_map(label_counts)
+    return ref_coords, ref_fg_labels, label_counts, label_to_colour
+
+
+def plot_tau_standalone_ref_fg(coords_2d, labels, tau_arr, tau_values,
+                                valid_smiles, dominant_fgs, out_dir, dpi=300):
+    """Per-tau: reference molecules coloured by dominant functional group.
+
+    The reference set is the same on every panel (it doesn't depend on tau),
+    but having one per tau keeps the panel set complete.
+    """
+    ref_coords, ref_fg_labels, label_counts, label_to_colour = \
+        _prepare_ref_fg_data(coords_2d, labels, valid_smiles, dominant_fgs)
 
     for tau_val in tau_values:
         fig, ax = plt.subplots(figsize=PANEL_SIZE)
         _draw_panel_a(ax, ref_coords, ref_fg_labels, label_counts,
                        label_to_colour, show_legend=True,
                        all_coords=coords_2d)
-        ax.set_title(f"Reference — Functional Groups (τ = {tau_val})", fontsize=13)
+        ax.set_title(f"Reference \u2014 Functional Groups (\u03c4 = {tau_val})", fontsize=13)
         fig.tight_layout()
         tau_str = f"{tau_val:.2f}".replace(".", "")
         _save_fig(fig, out_dir, f"tau_{tau_str}_ref_fg", dpi)
+
+
+def plot_tau_ref_fg_grid(coords_2d, labels, tau_arr, tau_values,
+                          valid_smiles, dominant_fgs, out_dir, dpi=300):
+    """Grid figure: reference FG panels (same data, one per tau for completeness)."""
+    ref_coords, ref_fg_labels, label_counts, label_to_colour = \
+        _prepare_ref_fg_data(coords_2d, labels, valid_smiles, dominant_fgs)
+
+    n_tau = len(tau_values)
+    if n_tau <= 4:
+        nrows, ncols = 1, n_tau
+    else:
+        ncols = 4
+        nrows = (n_tau + ncols - 1) // ncols
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 7 * nrows))
+
+    if n_tau == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
+        axes = axes.reshape(1, -1)
+    elif ncols == 1:
+        axes = axes.reshape(-1, 1)
+
+    panel_labels_list = [chr(ord("a") + i) for i in range(n_tau)]
+
+    for idx, tau_val in enumerate(tau_values):
+        row, col = divmod(idx, ncols)
+        ax = axes[row, col]
+        _draw_panel_a(ax, ref_coords, ref_fg_labels, label_counts,
+                       label_to_colour, show_legend=True,
+                       all_coords=coords_2d)
+        _add_invisible_colorbar(fig, ax)
+        ax.set_title(f"\u03c4 = {tau_val}", fontsize=14)
+        ax.text(0.02, 0.98, f"({panel_labels_list[idx]})",
+                transform=ax.transAxes, fontsize=16, fontweight="bold",
+                va="top", ha="left")
+
+    for idx in range(n_tau, nrows * ncols):
+        row, col = divmod(idx, ncols)
+        axes[row, col].set_visible(False)
+
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "tau_ref_fg_grid", dpi)
+
+
+def _draw_tau_gen_fg_panel(ax, coords_2d, labels, tau_arr, dominant_fgs,
+                            tau_val, label_to_colour, valid_smiles=None):
+    """Draw a single tau FG-coloured panel for generated molecules."""
+    ref_mask = labels == "reference"
+    tau_exp_mask = (labels == "explored") & (np.abs(tau_arr - tau_val) < 1e-6)
+    exp_coords = coords_2d[tau_exp_mask]
+
+    if dominant_fgs is not None:
+        exp_fg_labels = dominant_fgs[tau_exp_mask]
+    else:
+        exp_smiles = [s for s, m in zip(valid_smiles, tau_exp_mask) if m]
+        exp_fg_labels, _ = assign_dominant_fg(exp_smiles)
+
+    label_counts = Counter(exp_fg_labels)
+
+    # Reference background in light grey
+    ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
+               c="#EEEEEE", s=2, alpha=0.2, rasterized=True)
+
+    # GA molecules by FG
+    unique_labels = [lab for lab, _ in label_counts.most_common()]
+    if "Hydrocarbon only" in label_to_colour:
+        mask = exp_fg_labels == "Hydrocarbon only"
+        if mask.sum() > 0:
+            ax.scatter(exp_coords[mask, 0], exp_coords[mask, 1],
+                       c=label_to_colour.get("Hydrocarbon only", "#BBBBBB"),
+                       s=4, alpha=0.3,
+                       label=f"Hydrocarbon ({mask.sum()})", rasterized=True)
+    for lab in unique_labels:
+        if lab == "Hydrocarbon only":
+            continue
+        mask = exp_fg_labels == lab
+        if mask.sum() < 3:
+            continue
+        colour = label_to_colour.get(lab, "#999999")
+        ax.scatter(exp_coords[mask, 0], exp_coords[mask, 1],
+                   c=[colour], s=8, alpha=0.5,
+                   label=f"{lab} ({mask.sum()})", rasterized=True)
+
+    xlim, ylim = _robust_axis_limits(coords_2d)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.legend(fontsize=11, markerscale=2, frameon=False, loc="upper right",
+              ncol=1, handletextpad=0.3, labelspacing=0.3)
 
 
 def plot_tau_standalone_gen_fg(coords_2d, labels, tau_arr, tau_values,
@@ -677,106 +777,149 @@ def plot_tau_standalone_gen_fg(coords_2d, labels, tau_arr, tau_values,
     label_to_colour, _ = _build_global_fg_colour_map(dominant_fgs, labels)
 
     for tau_val in tau_values:
-        tau_exp_mask = (labels == "explored") & (np.abs(tau_arr - tau_val) < 1e-6)
-        exp_coords = coords_2d[tau_exp_mask]
-
-        if dominant_fgs is not None:
-            exp_fg_labels = dominant_fgs[tau_exp_mask]
-        else:
-            exp_smiles = [s for s, m in zip(valid_smiles, tau_exp_mask) if m]
-            exp_fg_labels, _ = assign_dominant_fg(exp_smiles)
-
-        label_counts = Counter(exp_fg_labels)
-
         fig, ax = plt.subplots(figsize=PANEL_SIZE)
-
-        # Background: reference in light grey
-        ref_mask = labels == "reference"
-        ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
-                   c="#EEEEEE", s=2, alpha=0.2, rasterized=True)
-
-        # GA molecules by FG
-        unique_labels = [lab for lab, _ in label_counts.most_common()]
-        if "Hydrocarbon only" in label_to_colour:
-            mask = exp_fg_labels == "Hydrocarbon only"
-            if mask.sum() > 0:
-                ax.scatter(exp_coords[mask, 0], exp_coords[mask, 1],
-                           c=label_to_colour.get("Hydrocarbon only", "#BBBBBB"),
-                           s=4, alpha=0.3,
-                           label=f"Hydrocarbon ({mask.sum()})", rasterized=True)
-        for lab in unique_labels:
-            if lab == "Hydrocarbon only":
-                continue
-            mask = exp_fg_labels == lab
-            if mask.sum() < 3:
-                continue
-            colour = label_to_colour.get(lab, "#999999")
-            ax.scatter(exp_coords[mask, 0], exp_coords[mask, 1],
-                       c=[colour], s=8, alpha=0.5,
-                       label=f"{lab} ({mask.sum()})", rasterized=True)
-
-        xlim, ylim = _robust_axis_limits(coords_2d)
-        ax.set_xlim(xlim)
-        ax.set_ylim(ylim)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_title(f"GA Generated — Functional Groups (τ = {tau_val})", fontsize=13)
-        ax.legend(fontsize=11, markerscale=2, frameon=False, loc="upper right",
-                  ncol=1, handletextpad=0.3, labelspacing=0.3)
+        _draw_tau_gen_fg_panel(ax, coords_2d, labels, tau_arr, dominant_fgs,
+                                tau_val, label_to_colour, valid_smiles)
+        ax.set_title(f"GA Generated — Functional Groups (\u03c4 = {tau_val})", fontsize=13)
         fig.tight_layout()
         tau_str = f"{tau_val:.2f}".replace(".", "")
         _save_fig(fig, out_dir, f"tau_{tau_str}_gen_fg", dpi)
+
+
+def plot_tau_gen_fg_grid(coords_2d, labels, tau_arr, tau_values,
+                          valid_smiles, dominant_fgs, out_dir, dpi=300):
+    """Grid figure: one generated-FG panel per tau value."""
+    label_to_colour, _ = _build_global_fg_colour_map(dominant_fgs, labels)
+
+    n_tau = len(tau_values)
+    if n_tau <= 4:
+        nrows, ncols = 1, n_tau
+    else:
+        ncols = 4
+        nrows = (n_tau + ncols - 1) // ncols
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 7 * nrows))
+
+    if n_tau == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
+        axes = axes.reshape(1, -1)
+    elif ncols == 1:
+        axes = axes.reshape(-1, 1)
+
+    panel_labels_list = [chr(ord("a") + i) for i in range(n_tau)]
+
+    for idx, tau_val in enumerate(tau_values):
+        row, col = divmod(idx, ncols)
+        ax = axes[row, col]
+        _draw_tau_gen_fg_panel(ax, coords_2d, labels, tau_arr, dominant_fgs,
+                                tau_val, label_to_colour, valid_smiles)
+        _add_invisible_colorbar(fig, ax)
+        ax.set_title(f"\u03c4 = {tau_val}", fontsize=14)
+        ax.text(0.02, 0.98, f"({panel_labels_list[idx]})",
+                transform=ax.transAxes, fontsize=16, fontweight="bold",
+                va="top", ha="left")
+
+    for idx in range(n_tau, nrows * ncols):
+        row, col = divmod(idx, ncols)
+        axes[row, col].set_visible(False)
+
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "tau_gen_fg_grid", dpi)
+
+
+def _draw_tau_validity_panel(ax, coords_2d, labels, tau_arr, is_valid, tau_val):
+    """Draw a single tau validity panel (valid/invalid/top)."""
+    tau_exp_mask = (labels == "explored") & (np.abs(tau_arr - tau_val) < 1e-6)
+    tau_top_mask = (labels == "top") & (np.abs(tau_arr - tau_val) < 1e-6)
+    ref_mask = labels == "reference"
+
+    # Reference background
+    ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
+               c="#EEEEEE", s=2, alpha=0.2, rasterized=True)
+
+    exp_coords = coords_2d[tau_exp_mask]
+    if is_valid is not None:
+        exp_valid = is_valid[tau_exp_mask]
+        valid_mask = exp_valid == 1
+        invalid_mask = exp_valid == 0
+
+        if invalid_mask.sum() > 0:
+            ax.scatter(exp_coords[invalid_mask, 0], exp_coords[invalid_mask, 1],
+                       c="#D64545", s=3, alpha=0.2,
+                       label=f"Invalid ({invalid_mask.sum():,})", rasterized=True)
+        if valid_mask.sum() > 0:
+            ax.scatter(exp_coords[valid_mask, 0], exp_coords[valid_mask, 1],
+                       c="#2CA02C", s=3, alpha=0.2,
+                       label=f"Valid ({valid_mask.sum():,})", rasterized=True)
+    else:
+        ax.scatter(exp_coords[:, 0], exp_coords[:, 1],
+                   c="#999999", s=3, alpha=0.15,
+                   label="Explored (no validity data)", rasterized=True)
+
+    # Top molecules
+    if tau_top_mask.sum() > 0:
+        ax.scatter(coords_2d[tau_top_mask, 0], coords_2d[tau_top_mask, 1],
+                   c="red", s=30, alpha=0.9, marker="*",
+                   label=f"Top {tau_top_mask.sum()}", zorder=5)
+
+    xlim, ylim = _robust_axis_limits(coords_2d)
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.legend(fontsize=12, markerscale=2, frameon=False, loc="upper right")
 
 
 def plot_tau_standalone_validity(coords_2d, labels, tau_arr, is_valid,
                                   tau_values, out_dir, dpi=300):
     """Per-tau: GA molecules coloured by validity (valid / invalid)."""
     for tau_val in tau_values:
-        tau_exp_mask = (labels == "explored") & (np.abs(tau_arr - tau_val) < 1e-6)
-        tau_top_mask = (labels == "top") & (np.abs(tau_arr - tau_val) < 1e-6)
-        ref_mask = labels == "reference"
-
         fig, ax = plt.subplots(figsize=PANEL_SIZE)
-
-        # Reference background
-        ax.scatter(coords_2d[ref_mask, 0], coords_2d[ref_mask, 1],
-                   c="#EEEEEE", s=2, alpha=0.2, rasterized=True)
-
-        exp_coords = coords_2d[tau_exp_mask]
-        if is_valid is not None:
-            exp_valid = is_valid[tau_exp_mask]
-            valid_mask = exp_valid == 1
-            invalid_mask = exp_valid == 0
-
-            if invalid_mask.sum() > 0:
-                ax.scatter(exp_coords[invalid_mask, 0], exp_coords[invalid_mask, 1],
-                           c="#D64545", s=3, alpha=0.2,
-                           label=f"Invalid ({invalid_mask.sum():,})", rasterized=True)
-            if valid_mask.sum() > 0:
-                ax.scatter(exp_coords[valid_mask, 0], exp_coords[valid_mask, 1],
-                           c="#2CA02C", s=3, alpha=0.2,
-                           label=f"Valid ({valid_mask.sum():,})", rasterized=True)
-        else:
-            ax.scatter(exp_coords[:, 0], exp_coords[:, 1],
-                       c="#999999", s=3, alpha=0.15,
-                       label="Explored (no validity data)", rasterized=True)
-
-        # Top molecules
-        if tau_top_mask.sum() > 0:
-            ax.scatter(coords_2d[tau_top_mask, 0], coords_2d[tau_top_mask, 1],
-                       c="red", s=30, alpha=0.9, marker="*",
-                       label=f"Top {tau_top_mask.sum()}", zorder=5)
-
-        xlim, ylim = _robust_axis_limits(coords_2d)
-        ax.set_xlim(xlim)
-        ax.set_ylim(ylim)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_title(f"Validity (τ = {tau_val})", fontsize=13)
-        ax.legend(fontsize=12, markerscale=2, frameon=False, loc="upper right")
+        _draw_tau_validity_panel(ax, coords_2d, labels, tau_arr, is_valid, tau_val)
+        ax.set_title(f"Validity (\u03c4 = {tau_val})", fontsize=13)
         fig.tight_layout()
         tau_str = f"{tau_val:.2f}".replace(".", "")
         _save_fig(fig, out_dir, f"tau_{tau_str}_validity", dpi)
+
+
+def plot_tau_validity_grid(coords_2d, labels, tau_arr, is_valid,
+                            tau_values, out_dir, dpi=300):
+    """Grid figure: one validity panel per tau value."""
+    n_tau = len(tau_values)
+    if n_tau <= 4:
+        nrows, ncols = 1, n_tau
+    else:
+        ncols = 4
+        nrows = (n_tau + ncols - 1) // ncols
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 7 * nrows))
+
+    if n_tau == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
+        axes = axes.reshape(1, -1)
+    elif ncols == 1:
+        axes = axes.reshape(-1, 1)
+
+    panel_labels_list = [chr(ord("a") + i) for i in range(n_tau)]
+
+    for idx, tau_val in enumerate(tau_values):
+        row, col = divmod(idx, ncols)
+        ax = axes[row, col]
+        _draw_tau_validity_panel(ax, coords_2d, labels, tau_arr, is_valid, tau_val)
+        _add_invisible_colorbar(fig, ax)
+        ax.set_title(f"\u03c4 = {tau_val}", fontsize=14)
+        ax.text(0.02, 0.98, f"({panel_labels_list[idx]})",
+                transform=ax.transAxes, fontsize=16, fontweight="bold",
+                va="top", ha="left")
+
+    for idx in range(n_tau, nrows * ncols):
+        row, col = divmod(idx, ncols)
+        axes[row, col].set_visible(False)
+
+    fig.tight_layout()
+    _save_fig(fig, out_dir, "tau_validity_grid", dpi)
 
 
 # ======================================================================
@@ -1682,6 +1825,14 @@ def main():
             print("\n  --- Standalone generated FG panels ---")
             plot_tau_standalone_gen_fg(coords_2d, labels, tau_arr, tau_values,
                                         valid_smiles, dominant_fgs, args.out_dir, dpi=args.dpi)
+
+            print("\n  --- Reference FG grid ---")
+            plot_tau_ref_fg_grid(coords_2d, labels, tau_arr, tau_values,
+                                  valid_smiles, dominant_fgs, args.out_dir, dpi=args.dpi)
+
+            print("\n  --- Generated FG grid ---")
+            plot_tau_gen_fg_grid(coords_2d, labels, tau_arr, tau_values,
+                                  valid_smiles, dominant_fgs, args.out_dir, dpi=args.dpi)
         else:
             print("\n  Skipping FG panels (no dominant_fgs in cache — rerun with --no_cache)")
 
@@ -1689,6 +1840,10 @@ def main():
             print("\n  --- Standalone validity panels ---")
             plot_tau_standalone_validity(coords_2d, labels, tau_arr, is_valid,
                                           tau_values, args.out_dir, dpi=args.dpi)
+
+            print("\n  --- Validity grid ---")
+            plot_tau_validity_grid(coords_2d, labels, tau_arr, is_valid,
+                                    tau_values, args.out_dir, dpi=args.dpi)
         else:
             print("\n  Skipping validity panels (no is_valid in cache — rerun with --no_cache)")
 
@@ -1824,9 +1979,21 @@ def main():
     plot_tau_standalone_gen_fg(coords_2d, labels, tau_arr, tau_values,
                                 valid_smiles, dominant_fgs, args.out_dir, dpi=args.dpi)
 
+    print("\n  --- Reference FG grid ---")
+    plot_tau_ref_fg_grid(coords_2d, labels, tau_arr, tau_values,
+                          valid_smiles, dominant_fgs, args.out_dir, dpi=args.dpi)
+
+    print("\n  --- Generated FG grid ---")
+    plot_tau_gen_fg_grid(coords_2d, labels, tau_arr, tau_values,
+                          valid_smiles, dominant_fgs, args.out_dir, dpi=args.dpi)
+
     print("\n  --- Standalone validity panels ---")
     plot_tau_standalone_validity(coords_2d, labels, tau_arr, is_valid,
                                   tau_values, args.out_dir, dpi=args.dpi)
+
+    print("\n  --- Validity grid ---")
+    plot_tau_validity_grid(coords_2d, labels, tau_arr, is_valid,
+                            tau_values, args.out_dir, dpi=args.dpi)
 
     # OOD panels (if Mahalanobis CSV provided)
     if args.mahal_csv is not None:

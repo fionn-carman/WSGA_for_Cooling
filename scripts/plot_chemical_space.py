@@ -105,6 +105,23 @@ FG_SHORT_NAMES = {
     "Acetal (R-O-CH-O-R)": "Acetal",
 }
 
+# Fixed colour assignments for functional groups — data-independent so every
+# panel/grid uses identical colours regardless of subset or ordering.
+FIXED_FG_COLOURS = {
+    "Ether":           "#1f77b4",  # blue
+    "Vinyl ether":     "#aec7e8",  # light blue
+    "Alcohol":         "#ff7f0e",  # orange
+    "Aldehyde":        "#ffbb78",  # light orange
+    "Ketone":          "#2ca02c",  # green
+    "Ester":           "#98df8a",  # light green
+    "Carboxylic acid": "#d62728",  # red
+    "Epoxide":         "#ff9896",  # light red
+    "Alkene":          "#9467bd",  # purple
+    "Terminal alkene": "#c5b0d5",  # light purple
+    "Acetal":          "#8c564b",  # brown
+    "Hydrocarbon only": "#BBBBBB", # grey
+}
+
 
 # ======================================================================
 # Utility functions
@@ -630,17 +647,20 @@ def _draw_panel_d(ax, coords_2d, labels, fitness, fig=None):
 # ======================================================================
 
 def _build_fg_colour_map(label_counts):
-    """Build a consistent FG label -> colour mapping from label counts."""
-    unique_labels = [lab for lab, _ in label_counts.most_common()]
-    cmap = plt.cm.tab20
+    """Build FG label -> colour mapping using fixed colour assignments.
+
+    Uses FIXED_FG_COLOURS for deterministic colours across all panels.
+    Falls back to tab20 only for unexpected labels not in the fixed map.
+    """
     label_to_colour = {}
-    colour_idx = 0
-    for lab in unique_labels:
-        if lab == "Hydrocarbon only":
-            label_to_colour[lab] = "#BBBBBB"
+    cmap = plt.cm.tab20
+    fallback_idx = 0
+    for lab, _ in label_counts.most_common():
+        if lab in FIXED_FG_COLOURS:
+            label_to_colour[lab] = FIXED_FG_COLOURS[lab]
         else:
-            label_to_colour[lab] = cmap(colour_idx / max(len(unique_labels) - 1, 1))
-            colour_idx += 1
+            label_to_colour[lab] = cmap(fallback_idx / 20)
+            fallback_idx += 1
     return label_to_colour
 
 
