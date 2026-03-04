@@ -1,0 +1,24 @@
+name: mol-rl
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - rdkit
+  - numpy
+  - pandas
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - xgboost
+  - tqdm
+  - joblib
+  - scipy
+  - pip
+  - pip:
+    - torch
+    - torchvision
+    - transformers
+    - accelerate
+    - stable-baselines3
+    - umap-learn
