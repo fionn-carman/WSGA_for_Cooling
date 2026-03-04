@@ -93,16 +93,29 @@ def run_shap_for_target(target, base_dir, fig_base_dir):
         X_test_scaled = scaler.transform(X_test)
 
         # Fix XGBoost/SHAP compatibility: newer XGBoost saves base_score
-        # as '[5.03E1]' which SHAP can't parse as float.  Round-trip
-        # through save_model/load_model to normalise the format, then
-        # pass the booster directly to SHAP.
+        # as '[5.03E1]' which SHAP can't parse as float.  Extract the
+        # booster, fix the base_score in its config, then pass to SHAP.
+        import json as _json
+        booster = model.get_booster()
+        config = _json.loads(booster.save_config())
+        raw_bs = config["learner"]["learner_model_param"]["base_score"]
+        # Strip brackets if present, e.g. '[5.0284836E1]' -> '5.0284836E1'
+        fixed_bs = str(float(raw_bs.strip("[]")))
+        config["learner"]["learner_model_param"]["base_score"] = fixed_bs
+        booster.save_config()  # not needed, we load below
         import tempfile, xgboost as xgb
         with tempfile.NamedTemporaryFile(suffix=".json", delete=True) as tmp:
-            model.save_model(tmp.name)
-            booster = xgb.Booster()
-            booster.load_model(tmp.name)
+            booster.save_model(tmp.name)
+            # Patch the saved JSON directly
+            with open(tmp.name, "r") as fj:
+                model_json = _json.load(fj)
+            model_json["learner"]["learner_model_param"]["base_score"] = fixed_bs
+            with open(tmp.name, "w") as fj:
+                _json.dump(model_json, fj)
+            fixed_booster = xgb.Booster()
+            fixed_booster.load_model(tmp.name)
 
-        explainer = shap.TreeExplainer(booster)
+        explainer = shap.TreeExplainer(fixed_booster)
         sv = explainer.shap_values(X_test_scaled)
 
         # Place into full arrays at the correct indices
