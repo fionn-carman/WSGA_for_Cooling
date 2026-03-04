@@ -51,6 +51,22 @@ def run_shap_for_target(target, base_dir, fig_base_dir):
     with open(data_dir / "fold_indices.json") as f:
         fold_indices = json.load(f)
 
+    # The saved models may have been trained with a different descriptor set
+    # than the regenerated descriptor_columns.json (e.g. different RDKit version
+    # producing different constant-column filtering).  Detect the expected
+    # feature count from the fold-0 scaler and truncate/match accordingly.
+    probe_path = data_dir / "xgboost_descriptors_fold0_model.joblib"
+    if probe_path.exists():
+        probe = joblib.load(probe_path)
+        expected_n = probe["scaler"].n_features_in_
+        if expected_n != len(descriptor_columns):
+            logger.warning(
+                "descriptor_columns.json has %d columns but model expects %d — "
+                "truncating to first %d columns",
+                len(descriptor_columns), expected_n, expected_n,
+            )
+            descriptor_columns = descriptor_columns[:expected_n]
+
     X_all = df[descriptor_columns].values
     n_samples = X_all.shape[0]
     n_features = X_all.shape[1]
