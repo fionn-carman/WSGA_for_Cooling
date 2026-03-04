@@ -25,17 +25,27 @@ import pandas as pd
 import shap
 
 # Monkey-patch SHAP to handle XGBoost base_score format like '[5.03E1]'
+_orig_float = float
+def _safe_float(x):
+    if isinstance(x, str) and x.startswith("[") and x.endswith("]"):
+        return _orig_float(x.strip("[]"))
+    return _orig_float(x)
+import builtins
+_real_builtins_float = builtins.float
+
+def _patch_float():
+    builtins.float = _safe_float
+
+def _unpatch_float():
+    builtins.float = _real_builtins_float
+
 _original_XGBTreeModelLoader_init = shap.explainers._tree.XGBTreeModelLoader.__init__
 def _patched_XGBTreeModelLoader_init(self, xgb_model):
+    _patch_float()
     try:
         _original_XGBTreeModelLoader_init(self, xgb_model)
-    except ValueError:
-        import json as _json
-        config = _json.loads(xgb_model.save_config())
-        raw = config["learner"]["learner_model_param"]["base_score"]
-        config["learner"]["learner_model_param"]["base_score"] = str(float(raw.strip("[]")))
-        xgb_model.load_config(_json.dumps(config))
-        _original_XGBTreeModelLoader_init(self, xgb_model)
+    finally:
+        _unpatch_float()
 shap.explainers._tree.XGBTreeModelLoader.__init__ = _patched_XGBTreeModelLoader_init
 
 logging.basicConfig(
