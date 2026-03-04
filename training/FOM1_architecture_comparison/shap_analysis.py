@@ -93,16 +93,16 @@ def run_shap_for_target(target, base_dir, fig_base_dir):
         X_test_scaled = scaler.transform(X_test)
 
         # Fix XGBoost/SHAP compatibility: newer XGBoost saves base_score
-        # as '[5.03E1]' which SHAP can't parse as float.
-        booster = model.get_booster()
-        config = json.loads(booster.save_config())
-        bs = config["learner"]["learner_model_param"]["base_score"]
-        if bs.startswith("["):
-            bs_fixed = bs.strip("[]")
-            config["learner"]["learner_model_param"]["base_score"] = bs_fixed
-            booster.load_config(json.dumps(config))
+        # as '[5.03E1]' which SHAP can't parse as float.  Round-trip
+        # through save_model/load_model to normalise the format, then
+        # pass the booster directly to SHAP.
+        import tempfile, xgboost as xgb
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=True) as tmp:
+            model.save_model(tmp.name)
+            booster = xgb.Booster()
+            booster.load_model(tmp.name)
 
-        explainer = shap.TreeExplainer(model)
+        explainer = shap.TreeExplainer(booster)
         sv = explainer.shap_values(X_test_scaled)
 
         # Place into full arrays at the correct indices
