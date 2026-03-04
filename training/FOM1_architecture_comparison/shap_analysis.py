@@ -92,6 +92,16 @@ def run_shap_for_target(target, base_dir, fig_base_dir):
         X_test = X_all[test_idx]
         X_test_scaled = scaler.transform(X_test)
 
+        # Fix XGBoost/SHAP compatibility: newer XGBoost saves base_score
+        # as '[5.03E1]' which SHAP can't parse as float.
+        booster = model.get_booster()
+        config = json.loads(booster.save_config())
+        bs = config["learner"]["learner_model_param"]["base_score"]
+        if bs.startswith("["):
+            bs_fixed = bs.strip("[]")
+            config["learner"]["learner_model_param"]["base_score"] = bs_fixed
+            booster.load_config(json.dumps(config))
+
         explainer = shap.TreeExplainer(model)
         sv = explainer.shap_values(X_test_scaled)
 
