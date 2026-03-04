@@ -250,7 +250,7 @@ def apply_mutations_to_population(
     return out_df, seen_smiles
 
 
-def evaluate_molecules(df, thermo_models, sc_model, tox21_models, biodeg_model, drop_descriptors=True):
+def evaluate_molecules(df, thermo_models, sc_model, tox21_models, biodeg_model, drop_descriptors=True, fom1_direct_models=None):
     """
     Evaluate molecules by predicting all thermophysical properties.
     
@@ -412,6 +412,30 @@ def evaluate_molecules(df, thermo_models, sc_model, tox21_models, biodeg_model, 
     df["Pr_avg"] = (df["Pr_40"] + df["Pr_100"]) / 2
     df["Gr_avg"] = (df["Gr_40"] + df["Gr_100"]) / 2
     df["Nu_avg"] = (df["Nu_40"] + df["Nu_100"]) / 2
+
+    # ----------------------------
+    # Predict FOM1 directly (XGBoost+Descriptor ensemble)
+    # ----------------------------
+    if fom1_direct_models is not None:
+        for temp_key, col_name in [('fom1_40', 'FOM1_40C_direct'), ('fom1_100', 'FOM1_100C_direct')]:
+            if temp_key not in fom1_direct_models:
+                continue
+            mdata = fom1_direct_models[temp_key]
+            desc_cols = mdata['descriptor_columns']
+
+            # Build feature matrix from the descriptors already in df
+            X_raw = df[desc_cols].copy()
+            X_raw = X_raw.apply(pd.to_numeric, errors='coerce').fillna(0)
+            X_raw = X_raw.replace([np.inf, -np.inf], 0)
+
+            # Ensemble prediction: average across 5 folds (each with its own scaler)
+            preds_all = []
+            for model, scaler in zip(mdata['models'], mdata['scalers']):
+                X_scaled = scaler.transform(X_raw.values)
+                preds_all.append(model.predict(X_scaled))
+            df[col_name] = np.mean(preds_all, axis=0)
+
+        df["FOM1_direct_avg"] = (df["FOM1_40C_direct"] + df["FOM1_100C_direct"]) / 2
 
     # ----------------------------
     # Drop descriptors/Mol if requested
@@ -885,6 +909,59 @@ def predict_tox21_batch(df, tox21_models):
 # ============================================================
 # Regression Model Loading with Auxiliary Feature Support
 # ============================================================
+
+def load_fom1_direct_models(fom1_model_dir):
+    """
+    Load XGBoost+Descriptor FOM1 direct prediction models (ensemble of 5 folds)
+    for both 40C and 100C.
+
+    Each fold's joblib contains: {'model': XGBRegressor, 'scaler': StandardScaler, 'params': dict}
+    The models were trained on a specific set of RDKit descriptors listed in descriptor_columns.json.
+
+    Args:
+        fom1_model_dir: Path to the FOM1 architecture comparison results directory,
+                        e.g. training/FOM1_architecture_comparison/results
+
+    Returns:
+        dict with keys 'fom1_40' and 'fom1_100', each containing:
+            - 'models': list of 5 XGBRegressor models (one per fold)
+            - 'scalers': list of 5 StandardScaler objects (one per fold)
+            - 'descriptor_columns': list of descriptor column names
+    """
+    import json
+
+    fom1_models = {}
+
+    for temp_key in ['fom1_40', 'fom1_100']:
+        temp_dir = os.path.join(fom1_model_dir, temp_key)
+
+        # Load descriptor columns
+        desc_cols_path = os.path.join(temp_dir, 'descriptor_columns.json')
+        if not os.path.exists(desc_cols_path):
+            raise FileNotFoundError(f"FOM1 descriptor columns not found: {desc_cols_path}")
+        with open(desc_cols_path) as f:
+            descriptor_columns = json.load(f)
+
+        # Load all 5 fold models
+        models = []
+        scalers = []
+        for fold_id in range(5):
+            model_path = os.path.join(temp_dir, f'xgboost_descriptors_fold{fold_id}_model.joblib')
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"FOM1 model not found: {model_path}")
+            model_data = joblib.load(model_path)
+            models.append(model_data['model'])
+            scalers.append(model_data['scaler'])
+
+        fom1_models[temp_key] = {
+            'models': models,
+            'scalers': scalers,
+            'descriptor_columns': descriptor_columns,
+        }
+        print(f"  Loaded FOM1 direct model: {temp_key} (5-fold ensemble, {len(descriptor_columns)} descriptors)")
+
+    return fom1_models
+
 
 def load_regression_models_with_aux(targets, model_dir):
     """

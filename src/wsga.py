@@ -31,7 +31,8 @@ from wsga_helper import (
     assign_validity,
     compute_fitness,
     apply_mp_penalty,
-    load_regression_models_with_aux
+    load_regression_models_with_aux,
+    load_fom1_direct_models
 )
 from evaluation import get_scscore_cached, strict_canonicalize_smiles
 from fragment_utils import prepare_fragments, crossover_fragments
@@ -74,8 +75,13 @@ parser.add_argument("--data_dir", type=str, default="../data", help="Data direct
 parser.add_argument("--model_dir", type=str, default="../models", help="Model directory")
 parser.add_argument("--Tau", type=float, default=0.05, help="Threshold for niching")
 parser.add_argument("--target", type=str, default="FOM1",
-    choices=["alpha", "beta", "Pr", "Gr", "Ra", "Nu", "FOM1", "FOM1_40", "FOM1_100"],
+    choices=["alpha", "beta", "Pr", "Gr", "Ra", "Nu", "FOM1", "FOM1_40", "FOM1_100",
+             "FOM1_direct", "FOM1_direct_40", "FOM1_direct_100"],
     help="Target property to optimize"
+)
+parser.add_argument("--fom1_model_dir", type=str,
+    default="../training/FOM1_architecture_comparison/results",
+    help="Directory containing FOM1 direct prediction models (fom1_40/ and fom1_100/ subdirs)"
 )
 parser.add_argument("--top_n", type=int, default=40, help="Number of top molecules to track and visualize")
 parser.add_argument("--num_generations", type=int, default=200, help="Number of generations to run")
@@ -143,6 +149,9 @@ TARGET_CONFIG = {
     "FOM1":  {"column": "FOM1_avg",  "maximize": True},
     "FOM1_40":  {"column": "FOM1_40",  "maximize": True},
     "FOM1_100": {"column": "FOM1_100", "maximize": True},
+    "FOM1_direct":     {"column": "FOM1_direct_avg",  "maximize": True},
+    "FOM1_direct_40":  {"column": "FOM1_40C_direct",  "maximize": True},
+    "FOM1_direct_100": {"column": "FOM1_100C_direct", "maximize": True},
 }
 
 # Selection Criteria (validity thresholds) - from args for case studies
@@ -206,6 +215,7 @@ print(f"Flash point: {MIN_FLASHPOINT}K")
 print(f"SCScore max: {MAX_SCSCORE}")
 print(f"Tox21 max: {MAX_TOX21}")
 print(f"Biodeg filter: {USE_BIODEG_FILTER}")
+print(f"FOM1 model dir: {args.fom1_model_dir}")
 print(f"==============================================")
 
 
@@ -295,6 +305,7 @@ TRACKED_PROPERTIES = [
     'beta_40', 'beta_100', 'beta_avg',
     'Ra_40', 'Ra_100', 'Ra_avg',
     'FOM1_40', 'FOM1_100', 'FOM1_avg',
+    'FOM1_40C_direct', 'FOM1_100C_direct', 'FOM1_direct_avg',
     'Pr_40', 'Pr_100', 'Pr_avg',
     'Gr_40', 'Gr_100', 'Gr_avg',
     'Nu_40', 'Nu_100', 'Nu_avg',
@@ -400,7 +411,7 @@ def compute_generation_stats(top_n_df, generation):
     # Properties to compute stats for
     stat_properties = [
         'FitnessScore', 'NichedFitnessScore', 'AvgTanimotoSimilarity',
-        'alpha_avg', 'beta_avg', 'FOM1_avg', 'Ra_avg',
+        'alpha_avg', 'beta_avg', 'FOM1_avg', 'FOM1_direct_avg', 'Ra_avg',
         'Thermal_Conductivity_40C', 'Kinematic_Viscosity_40C',
         'SCScore', 'Tox21_Score', 'MP_Penalty', 'MP-Measured'
     ]
@@ -477,6 +488,18 @@ def main():
     biodeg_dir = os.path.join(MODEL_DIR, "biodegradability")
     biodeg_model = load_biodeg_model(biodeg_dir)
 
+    # FOM1 direct prediction models (XGBoost+Descriptor ensemble)
+    fom1_direct_models = None
+    if TARGET in ("FOM1_direct", "FOM1_direct_40", "FOM1_direct_100"):
+        print("\nLoading FOM1 direct prediction models...")
+        fom1_direct_models = load_fom1_direct_models(args.fom1_model_dir)
+    else:
+        # Still load them if directory exists, so predictions are always available
+        try:
+            fom1_direct_models = load_fom1_direct_models(args.fom1_model_dir)
+        except FileNotFoundError:
+            print("FOM1 direct models not found - FOM1_direct columns will not be computed")
+
     print("Models loaded successfully.\n")
 
     # ----- Initialize Population -----
@@ -522,7 +545,8 @@ def main():
         thermo_models=thermo_models,
         sc_model=sc_model,
         tox21_models=tox21_models,
-        biodeg_model=biodeg_model
+        biodeg_model=biodeg_model,
+        fom1_direct_models=fom1_direct_models
     )
 
     evaluated_df = assign_validity(
@@ -661,7 +685,8 @@ def main():
             thermo_models=thermo_models,
             sc_model=sc_model,
             tox21_models=tox21_models,
-            biodeg_model=biodeg_model
+            biodeg_model=biodeg_model,
+            fom1_direct_models=fom1_direct_models
         )
 
         evaluated_offspring_df = assign_validity(
@@ -742,6 +767,9 @@ def main():
         if 'FOM1_avg' in top_n_df.columns:
             print(f"  Best FOM1:           {top_n_df['FOM1_avg'].max():.4f}")
             print(f"  Mean FOM1:           {top_n_df['FOM1_avg'].mean():.4f}")
+        if 'FOM1_direct_avg' in top_n_df.columns:
+            print(f"  Best FOM1 (direct):  {top_n_df['FOM1_direct_avg'].max():.4f}")
+            print(f"  Mean FOM1 (direct):  {top_n_df['FOM1_direct_avg'].mean():.4f}")
         if 'alpha_avg' in top_n_df.columns:
             print(f"  Mean alpha:          {top_n_df['alpha_avg'].mean():.6f}")
 
@@ -806,7 +834,8 @@ def main():
                             thermo_models=thermo_models,
                             sc_model=sc_model,
                             tox21_models=tox21_models,
-                            biodeg_model=biodeg_model
+                            biodeg_model=biodeg_model,
+                            fom1_direct_models=fom1_direct_models
                         )
                         fresh_evaluated = assign_validity(
                             fresh_evaluated,

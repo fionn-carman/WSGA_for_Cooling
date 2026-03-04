@@ -516,7 +516,7 @@ Figure~\ref{fig:shap_cross_temp} provides a direct comparison of the top 15 desc
 
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=\textwidth]{figures/combined/shap_cross_temperature.pdf}
+    \includegraphics[width=\textwidth]{figures/combined/cross_temperature_comparison.pdf}
     \caption{Cross-temperature comparison of descriptor importance. The top 15 descriptors by average mean $|\text{SHAP}|$ are shown, with bars comparing the \SI{40}{\degreeCelsius} and \SI{100}{\degreeCelsius} models.}
     \label{fig:shap_cross_temp}
 \end{figure}
@@ -562,11 +562,22 @@ There is considerable variation in training time across architectures. Ridge reg
 \subsection{Interpretability Through SHAP}
 \label{sec:shap_discussion}
 
-The SHAP analysis provides a physically grounded interpretation of the XGBoost models and reinforces the conclusion that descriptor-based representations are well-suited for FOM1 prediction. The beeswarm plots (Figures~\ref{fig:shap_beeswarm_40} and~\ref{fig:shap_beeswarm_100}) reveal that a relatively small number of descriptors dominate the predictions at both temperatures, with the top 5--10 features accounting for the majority of the total SHAP magnitude. This concentrated importance structure is consistent with the physical nature of FOM1, which depends on a handful of thermophysical properties.
+The SHAP analysis provides a physically grounded interpretation of the XGBoost models and reveals which molecular properties most strongly influence cooling performance. The beeswarm plots (Figures~\ref{fig:shap_beeswarm_40} and~\ref{fig:shap_beeswarm_100}) show that a small number of descriptors dominate the predictions at both temperatures, with the top 5--10 features accounting for the majority of the total SHAP magnitude. This concentrated importance structure is consistent with the physical nature of FOM1, which depends on a handful of thermophysical properties.
 
-The cross-temperature comparison (Figure~\ref{fig:shap_cross_temp}) is particularly informative: descriptors related to bulk molecular properties (e.g., molecular weight, topological indices, hydrogen bonding capacity) tend to maintain their importance across both temperatures, while descriptors capturing more temperature-sensitive properties may shift in relative ranking. This aligns with the observation that model accuracy degrades at \SI{100}{\degreeCelsius} --- the increased thermal energy introduces additional structure--property relationships that are harder to capture with room-temperature-derived descriptors.
+\paragraph{Dominant descriptors.}
+At both temperatures, the Kier--Hall connectivity index \texttt{Chi0} is by far the most influential descriptor (mean $|\text{SHAP}| = 4.72$ at \SI{40}{\degreeCelsius}, $7.95$ at \SI{100}{\degreeCelsius}). \texttt{Chi0} sums the reciprocal square roots of vertex degrees across all bonds and serves as a proxy for molecular size and branching --- larger, more extended molecules have higher \texttt{Chi0} values. Its dominance reflects the strong dependence of FOM1 on bulk transport properties (viscosity, thermal conductivity) that scale with molecular size. The closely related \texttt{Chi0v}, which incorporates valence electron counts, ranks second at \SI{40}{\degreeCelsius} and fourth at \SI{100}{\degreeCelsius}, reinforcing that molecular connectivity and heteroatom content are primary drivers of cooling performance.
 
-The interpretability afforded by SHAP analysis is a practical advantage of XGBoost on descriptors over black-box alternatives such as ChemBERTa embeddings, where the latent features lack direct physical meaning. This interpretability can guide future descriptor engineering and inform physical understanding of what drives cooling performance.
+\texttt{FpDensityMorgan1} (Morgan fingerprint density at radius 1) is the third most important feature at both temperatures. This descriptor captures the ratio of unique structural fragments to molecular size and effectively encodes molecular complexity --- molecules with more diverse local chemical environments relative to their size tend to have different thermophysical behaviour. \texttt{SlogP\_VSA4}, which measures the van der Waals surface area contribution from atoms with intermediate lipophilicity, ranks consistently in the top four, linking cooling performance to the balance between polar and non-polar surface area --- a key factor governing liquid-phase intermolecular interactions, heat capacity, and thermal conductivity.
+
+\texttt{BCUT2D\_LOGPHI} (the highest eigenvalue of the Burden matrix weighted by atomic log\,P contributions) is the fifth most important descriptor at \SI{40}{\degreeCelsius} but drops to tenth at \SI{100}{\degreeCelsius}. This descriptor captures the distribution of hydrophobicity across the molecular topology. Its diminished importance at higher temperatures may reflect the reduced influence of hydrophobic interactions on transport properties as thermal energy increases.
+
+\paragraph{Temperature-dependent shifts.}
+The cross-temperature comparison (Figure~\ref{fig:shap_cross_temp}) reveals both stability and shifts in descriptor importance. \texttt{Chi0} nearly doubles in importance from \SI{40}{\degreeCelsius} to \SI{100}{\degreeCelsius}, suggesting that molecular size becomes an even stronger predictor of cooling performance at elevated temperatures, likely because viscosity (which scales strongly with molecular size) becomes a more limiting factor in the FOM1 expression at higher temperatures. \texttt{MaxAbsEStateIndex}, which encodes the most extreme electrotopological state in the molecule (typically associated with highly polar or reactive functional groups), rises from tenth at \SI{40}{\degreeCelsius} to fifth at \SI{100}{\degreeCelsius}, indicating that the presence of strongly polar groups has greater influence on high-temperature cooling performance. Conversely, \texttt{Chi4n} (a higher-order connectivity index capturing four-bond path topologies) drops substantially in ranking at \SI{100}{\degreeCelsius}, suggesting that fine structural details of molecular branching become less relevant at elevated temperatures where bulk properties dominate.
+
+\paragraph{Physical interpretation.}
+Taken together, the SHAP results paint a coherent physical picture: FOM1 is primarily governed by (i)~molecular size and connectivity (\texttt{Chi0}, \texttt{Chi0v}, \texttt{Chi1n}), which control viscosity and thermal conductivity; (ii)~the distribution of polar and non-polar surface area (\texttt{SlogP\_VSA4}, \texttt{BCUT2D\_LOGPHI}, \texttt{SMR\_VSA5}), which influences intermolecular forces and heat capacity; and (iii)~atomic charge distribution (\texttt{MinAbsPartialCharge}, \texttt{MaxAbsEStateIndex}), which captures the strength of dipolar interactions. This hierarchy suggests that ideal cooling fluids are small, compact molecules with moderate polarity and low viscosity --- consistent with known engineering heuristics for selecting heat transfer fluids.
+
+The interpretability afforded by SHAP analysis is a practical advantage of XGBoost on descriptors over black-box alternatives such as ChemBERTa embeddings, where the latent features lack direct physical meaning. These insights can directly guide molecular design: for instance, screening libraries could be pre-filtered for molecules with low \texttt{Chi0} (small size) and moderate \texttt{SlogP\_VSA4} (balanced polarity) to enrich for high-FOM1 candidates.
 
 % ============================================================
 \section{Conclusion}
@@ -595,20 +606,69 @@ For deployment in a molecular screening or optimisation pipeline:
     \item If uncertainty quantification is required, use the \textbf{Deep Ensemble MLP} (which provides calibrated epistemic and aleatoric uncertainty estimates), but note its reduced accuracy relative to the top models.
 \end{itemize}
 
-\subsection{Future Work}
+\subsection{Future Work: Molecular Optimisation via Bayesian Optimisation and Reinforcement Learning}
 
-Several directions could improve FOM1 prediction accuracy and utility:
+The surrogate models developed in this study --- particularly the XGBoost (descriptors) and Deep Ensemble MLP models --- are not merely predictive tools; they form the foundation for automated molecular optimisation pipelines. Two complementary strategies are proposed: Bayesian optimisation (BO) for efficient exploration of molecular space, and reinforcement learning (RL) for generative molecular design.
+
+\subsubsection{Bayesian Optimisation}
+
+Bayesian optimisation is a sample-efficient strategy for optimising expensive black-box objective functions. In the molecular context, the objective is to find molecules that maximise FOM1 (or a multi-objective function incorporating FOM1 at both temperatures, synthetic accessibility, and safety constraints). The trained surrogate model serves as the objective function, replacing the need for costly thermophysical property calculations or experimental measurements at each evaluation.
+
+The BO loop proceeds as follows:
+\begin{enumerate}
+    \item \textbf{Surrogate model:} The Deep Ensemble MLP is particularly well-suited as the BO surrogate because it provides both a mean prediction $\hat{y}(\mathbf{x})$ and a calibrated uncertainty estimate $\sigma(\mathbf{x})$ for each candidate molecule. The epistemic uncertainty (disagreement between ensemble members) naturally quantifies model confidence, which is essential for balancing exploration and exploitation.
+
+    \item \textbf{Acquisition function:} An acquisition function such as Expected Improvement (EI) or Upper Confidence Bound (UCB) uses the surrogate's mean and uncertainty to select the next molecule to evaluate. Molecules in under-explored regions of chemical space (high $\sigma$) are favoured alongside molecules with high predicted FOM1 (high $\hat{y}$), preventing the optimiser from converging prematurely to a local optimum.
+
+    \item \textbf{Molecular representation:} Candidate molecules are represented as descriptor vectors (the same 105 RDKit descriptors used in this study), and the BO search operates over this continuous descriptor space. A key challenge is the \emph{inverse mapping problem}: not every point in descriptor space corresponds to a valid molecule. This can be addressed by (i)~constraining the search to a pre-enumerated virtual library (e.g., GDB-17, ZINC), where BO selects the most promising candidates for evaluation; or (ii)~coupling BO with a generative model that maps from latent space to valid SMILES strings.
+
+    \item \textbf{Iterative refinement:} After evaluating the selected molecule (either by computing its true FOM1 from thermophysical property predictions or by experimental measurement), the surrogate model is updated with the new data point, and the loop repeats. Typically 50--200 iterations suffice to identify high-performing candidates from libraries of millions.
+\end{enumerate}
+
+The XGBoost model, while lacking native uncertainty quantification, can also serve as a BO surrogate by bootstrapping predictions across the five cross-validation folds to estimate uncertainty, or by using a separate Gaussian process fitted to the XGBoost predictions.
+
+\subsubsection{Reinforcement Learning for Generative Molecular Design}
+
+While BO searches within a fixed molecular library, reinforcement learning (RL) can \emph{generate} entirely new molecular structures optimised for cooling performance. In this framework, a generative model (the \emph{agent}) learns to construct molecules token-by-token (as SMILES strings) or fragment-by-fragment, guided by a reward signal derived from the trained surrogate model.
+
+The RL pipeline consists of the following components:
+\begin{enumerate}
+    \item \textbf{Policy network (agent):} A recurrent neural network (RNN) or transformer pre-trained on a large corpus of valid SMILES strings (e.g., ChEMBL, ZINC) to learn the grammar of molecular notation. This pre-training ensures that the agent generates syntactically valid and chemically plausible molecules from the outset.
+
+    \item \textbf{Reward function:} The trained surrogate model (XGBoost or Deep Ensemble MLP) evaluates each generated molecule and returns a reward proportional to its predicted FOM1. The reward function can be augmented with additional terms to penalise undesirable properties:
+    \begin{equation}
+        R(\text{mol}) = w_1 \cdot \widehat{\text{FOM1}}_{40}(\text{mol}) + w_2 \cdot \widehat{\text{FOM1}}_{100}(\text{mol}) - w_3 \cdot \text{SA}(\text{mol}) - w_4 \cdot \mathbb{1}[\text{toxic}(\text{mol})]
+    \end{equation}
+    where SA is a synthetic accessibility score and the weights $w_i$ encode design priorities.
+
+    \item \textbf{Policy gradient training:} The agent is fine-tuned using a policy gradient algorithm such as REINFORCE or Proximal Policy Optimisation (PPO). At each step, the agent generates a batch of molecules, computes their rewards, and updates its policy to increase the probability of generating high-reward structures. An entropy bonus or KL penalty relative to the pre-trained prior prevents mode collapse (the agent generating only slight variations of a single molecule).
+
+    \item \textbf{Experience replay and diversity:} To maintain chemical diversity, techniques such as experience replay (storing and re-sampling high-reward molecules) and novelty bonuses (rewarding structural dissimilarity from previously generated molecules) can be employed.
+\end{enumerate}
+
+\subsubsection{Advantages of the Trained Surrogate Models}
+
+The deep learning models developed in this study offer several specific advantages for BO and RL molecular optimisation:
 
 \begin{itemize}
-    \item \textbf{Graph Neural Networks (GNNs):} Architectures such as Message Passing Neural Networks (MPNNs) or Graph Attention Networks (GATs) operate directly on molecular graphs (atoms as nodes, bonds as edges) rather than requiring hand-crafted features or SMILES string processing. GNNs have shown strong performance on molecular property prediction benchmarks and could potentially capture structure--property relationships that neither descriptors nor fingerprints encode.
+    \item \textbf{Fast inference:} Both XGBoost and the MLP ensemble evaluate a candidate molecule in under 1\,ms, enabling the reward function to be called millions of times during RL training or thousands of times per BO iteration without computational bottleneck. By contrast, computing FOM1 from first-principles thermophysical property models (group contribution methods, molecular dynamics) takes seconds to hours per molecule.
 
-    \item \textbf{Expanded training data:} The current dataset is modest in size, which limits the effectiveness of data-hungry models (transformers, deep MLPs). Incorporating additional FOM1 measurements, calculated FOM1 values from molecular simulation, or related transfer-learning targets (individual thermophysical properties) could improve performance, particularly for the neural network architectures.
+    \item \textbf{Differentiability:} The neural network models (MLP, Deep Ensemble, ChemBERTa) are fully differentiable, enabling gradient-based optimisation in continuous molecular representations. This allows the use of more sophisticated BO acquisition function optimisation and enables direct backpropagation of the reward signal through the surrogate in RL, which can accelerate convergence compared to score-function gradient estimators.
 
-    \item \textbf{Multi-task learning:} Rather than predicting FOM1 at each temperature independently, a multi-task model could predict FOM1 at both temperatures simultaneously, sharing information between the two tasks. This could improve generalisation, especially at \SI{100}{\degreeCelsius} where performance is weaker.
+    \item \textbf{Uncertainty quantification:} The Deep Ensemble MLP provides calibrated uncertainty estimates that serve dual purposes: (i)~as the exploration term in BO acquisition functions, and (ii)~as a confidence filter in RL, where generated molecules with high surrogate uncertainty can be flagged for explicit validation rather than trusted blindly. This prevents the optimiser from exploiting regions where the surrogate is unreliable --- a well-known failure mode in model-based optimisation known as \emph{reward hacking}.
 
-    \item \textbf{Feature importance analysis:} SHAP (SHapley Additive exPlanations) analysis of the XGBoost models would reveal which specific molecular descriptors are most predictive of FOM1, providing chemical insight into what makes a good coolant and guiding molecular design.
-
-    \item \textbf{Domain adaptation for extreme temperatures:} The performance degradation at \SI{100}{\degreeCelsius} suggests that high-temperature regimes involve different structure--property relationships. Domain adaptation techniques or temperature-conditioned models could bridge this gap.
+    \item \textbf{Multi-temperature optimisation:} Separate models at \SI{40}{\degreeCelsius} and \SI{100}{\degreeCelsius} enable Pareto-front optimisation, identifying molecules that perform well across the full operating temperature range rather than at a single condition. This is straightforward to implement in both BO (using multi-objective acquisition functions such as Expected Hypervolume Improvement) and RL (using a weighted multi-objective reward).
 \end{itemize}
+
+\subsubsection{Proposed Implementation}
+
+We propose a two-stage optimisation pipeline:
+\begin{enumerate}
+    \item \textbf{Stage 1 --- Bayesian optimisation over virtual libraries.} Screen a large virtual library (e.g., the ZINC database of commercially available molecules, or an enumerated combinatorial library of candidate coolant scaffolds) using BO with the Deep Ensemble MLP as the surrogate. This identifies the highest-FOM1 molecules among known, synthesisable compounds and provides a performance baseline. The SHAP-derived insights (Section~\ref{sec:shap_discussion}) can be used to pre-filter the library, retaining only molecules with descriptor values in ranges associated with high FOM1 (e.g., low \texttt{Chi0}, moderate \texttt{SlogP\_VSA4}).
+
+    \item \textbf{Stage 2 --- Reinforcement learning for de novo design.} Train a SMILES-based generative agent (pre-trained on ChEMBL) using the XGBoost surrogate as the reward function, with the BO-identified top molecules seeded into the replay buffer as starting points. The RL agent explores beyond the known chemical space, proposing novel molecular structures that may exceed the performance of any molecule in the virtual library. Generated candidates are validated by (i)~checking surrogate uncertainty (rejecting molecules where the Deep Ensemble disagrees strongly), (ii)~verifying synthetic accessibility, and (iii)~computing FOM1 from independent thermophysical property models for the top candidates.
+\end{enumerate}
+
+This two-stage approach combines the sample efficiency of BO (exploiting the known chemical space) with the creative capacity of RL (exploring beyond it), while the trained surrogate models provide the fast, accurate objective evaluations that make both approaches computationally tractable.
 
 \end{document}
