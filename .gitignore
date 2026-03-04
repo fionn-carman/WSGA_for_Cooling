@@ -23,3 +23,10 @@ src/logs/
 # PBS job logs
 *.e[0-9]*
 *.o[0-9]*
+
+# LaTeX
+*.tex
+*.aux
+*.log
+*.pdf
+*.synctex.gz

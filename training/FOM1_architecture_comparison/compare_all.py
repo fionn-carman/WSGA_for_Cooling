@@ -46,6 +46,8 @@ MODEL_NAMES = {
     "ridge_embeddings": "Ridge (embeddings)",
     "bilstm": "BiLSTM",
     "ensemble_mlp": "Deep Ensemble MLP",
+    "xgboost_descriptors": "XGBoost (descriptors)",
+    "xgboost_fingerprints": "XGBoost (fingerprints)",
 }
 
 COLORS = {
@@ -57,6 +59,8 @@ COLORS = {
     "ridge_embeddings": "#8c564b",
     "bilstm": "#e377c2",
     "ensemble_mlp": "#7f7f7f",
+    "xgboost_descriptors": "#17becf",
+    "xgboost_fingerprints": "#bcbd22",
 }
 
 

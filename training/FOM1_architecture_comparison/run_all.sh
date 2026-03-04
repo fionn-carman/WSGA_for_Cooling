@@ -2,23 +2,29 @@
 #PBS -N fom1_arch
 #PBS -lwalltime=72:00:00
 #PBS -lselect=1:ncpus=16:mem=64gb
-#PBS -J 0-79
+#PBS -J 0-99
 
 # ============================================================
 # FOM1 Architecture Comparison — All Temperatures + Folds
 # ============================================================
 #
-# 80 jobs total: 8 architectures × 2 temperatures × 5 folds
+# 100 jobs total: 10 architectures × 2 temperatures × 5 folds
 #
 # Index decoding:
-#   arch_idx  = N / 10       (0..7)
+#   arch_idx  = N / 10       (0..9)
 #   temp_idx  = (N % 10) / 5 (0 or 1)
 #   fold_idx  = N % 5        (0..4)
 #
-# Submit all 80 jobs:
+# Submit all 100 jobs:
 #   qsub run_all.sh
 #
-# Submit a subset (e.g. XGBoost only, both temps):
+# Submit original 8 architectures only:
+#   qsub -J 0-79 run_all.sh
+#
+# Submit new XGBoost variants only:
+#   qsub -J 80-99 run_all.sh
+#
+# Submit a subset (e.g. XGBoost combined only, both temps):
 #   qsub -J 0-9 run_all.sh
 #
 # Run locally (e.g. XGBoost / FOM1_40 / fold 0):
@@ -60,6 +66,8 @@ ARCHITECTURES=(
     ridge_embeddings
     bilstm
     ensemble_mlp
+    xgboost_descriptors
+    xgboost_fingerprints
 )
 
 TARGETS=(FOM1_40 FOM1_100)
