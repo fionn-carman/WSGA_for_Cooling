@@ -20,13 +20,30 @@ Thumbs.db
 # Runtime logs
 src/logs/
 
+# Locally stored results
+training/FOM1_architecture_comparison/results/
+
+# Generated figures
+training/FOM1_architecture_comparison/figures/
+
 # PBS job logs
 *.e[0-9]*
 *.o[0-9]*
 
-# LaTeX
-*.tex
+# LaTeX build outputs
 *.aux
 *.log
-*.pdf
 *.synctex.gz
+
+# Compiled PDFs (keep .tex source tracked)
+*.pdf
+
+# Saved models
+*.joblib
+
+# Large binary files
+*.npy
+*.npz
+
+# ChemBERTa local model cache
+chemberta_model/
