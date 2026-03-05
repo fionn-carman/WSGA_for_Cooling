@@ -143,8 +143,9 @@ def main():
         with open(data_dir / f"xgboost_descriptors_fold{fold_id}_metrics.json", "w") as f:
             json.dump(metrics, f, indent=2)
 
-        # Save model
-        joblib.dump({"model": best_model, "scaler": scaler, "params": search.best_params_},
+        # Save model (include descriptor_columns so feature names stay with the model)
+        joblib.dump({"model": best_model, "scaler": scaler, "params": search.best_params_,
+                     "descriptor_columns": descriptor_columns},
                      data_dir / f"xgboost_descriptors_fold{fold_id}_model.joblib")
 
     logger.info("XGBoost Descriptors training complete.")

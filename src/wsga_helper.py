@@ -953,13 +953,23 @@ def load_fom1_direct_models(fom1_model_dir):
             models.append(model_data['model'])
             scalers.append(model_data['scaler'])
 
-        # Reconcile descriptor_columns.json with actual model feature count
-        # (JSON may list all descriptors before constant-column removal during training)
+            # Prefer descriptor_columns from joblib (saved alongside model during training)
+            # over descriptor_columns.json which may have been regenerated with a different RDKit
+            if fold_id == 0 and 'descriptor_columns' in model_data:
+                if model_data['descriptor_columns'] != descriptor_columns:
+                    print(f"  NOTE: Using descriptor_columns from model joblib "
+                          f"({len(model_data['descriptor_columns'])} cols) instead of JSON "
+                          f"({len(descriptor_columns)} cols)")
+                descriptor_columns = model_data['descriptor_columns']
+
+        # Final check: ensure descriptor count matches scaler expectation
         expected_n = scalers[0].n_features_in_
         if expected_n != len(descriptor_columns):
-            print(f"  WARNING: descriptor_columns.json has {len(descriptor_columns)} columns "
-                  f"but model expects {expected_n} — truncating to first {expected_n} columns")
-            descriptor_columns = descriptor_columns[:expected_n]
+            raise ValueError(
+                f"FOM1 {temp_key}: descriptor_columns has {len(descriptor_columns)} entries "
+                f"but scaler expects {expected_n} features. The models need to be retrained "
+                f"with train_xgboost_descriptors.py to embed the correct feature names."
+            )
 
         fom1_models[temp_key] = {
             'models': models,
