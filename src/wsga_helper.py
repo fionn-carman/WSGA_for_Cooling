@@ -953,6 +953,14 @@ def load_fom1_direct_models(fom1_model_dir):
             models.append(model_data['model'])
             scalers.append(model_data['scaler'])
 
+        # Reconcile descriptor_columns.json with actual model feature count
+        # (JSON may list all descriptors before constant-column removal during training)
+        expected_n = scalers[0].n_features_in_
+        if expected_n != len(descriptor_columns):
+            print(f"  WARNING: descriptor_columns.json has {len(descriptor_columns)} columns "
+                  f"but model expects {expected_n} — truncating to first {expected_n} columns")
+            descriptor_columns = descriptor_columns[:expected_n]
+
         fom1_models[temp_key] = {
             'models': models,
             'scalers': scalers,
