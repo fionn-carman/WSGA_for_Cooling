@@ -1,34 +1,88 @@
 #!/bin/bash
+#PBS -N wsga_fom1_direct_test
+#PBS -l walltime=72:00:00
+#PBS -l select=1:ncpus=1:mem=32gb
+#PBS -J 0-9
+#PBS -o /dev/null
+#PBS -e /dev/null
+
+set -o pipefail
+
 # ============================================================
-# Local test of WSGA FOM1 Direct Prediction (mol-rl env)
+# WSGA FOM1 Direct Prediction Run — mol-rl env test
 # ============================================================
 #
-# Quick single-run test to verify the WSGA works with the
-# mol-rl conda environment and the FOM1 direct prediction models.
+# Exact copy of fom1_direct_run.sh but uses mol-rl conda env
+# and writes to a separate output directory.
 #
-# Uses small population and few generations for fast iteration.
+# Two constraint variants:
+#   - bio:     biodegradability filter ON  (indices 0-4)
+#   - non_bio: biodegradability filter OFF (indices 5-9)
+#
+# Seeds: [42, 123, 7, 256, 999]  (5 per variant)
+#
+# Total: 2 * 5 = 10 jobs
+#
+# Uses best GA hyperparameters from previous sweeps.
 #
 # Usage:
-#   bash fom1_direct_test.sh
+#   qsub fom1_direct_test.sh
+#   qsub -J 0-0 fom1_direct_test.sh   # single test job
+#   bash fom1_direct_test.sh 0          # local test
 # ============================================================
 
-DIRECTORY=$(cd "$(dirname "$0")" && pwd)
-cd "$DIRECTORY"
+DIRECTORY="$PBS_O_WORKDIR"
+N=${PBS_ARRAY_INDEX}
+
+if [ -z "$N" ]; then
+    if [ $# -eq 1 ]; then
+        N=$1
+        DIRECTORY=$(pwd)
+    else
+        echo "Usage: bash fom1_direct_test.sh <array_index>"
+        exit 1
+    fi
+fi
 
 eval "$(~/miniforge3/bin/conda shell.bash hook)"
 conda activate mol-rl
+cd "$DIRECTORY"
 
 # ==============================
-# Small test parameters
+# Best GA parameters (from sweeps)
 # ==============================
-POP=100
+POP=3000
 MR=0.8
 ER=0.25
 BER=0.5
 K=3
 TAU=0.15
-NUM_GENERATIONS=3
+NUM_GENERATIONS=200
 
+# ==============================
+# Sweep grid
+# ==============================
+seeds=(42 123 7 256 999)
+
+# ==============================
+# Decode array index
+# ==============================
+n_seed=${#seeds[@]}
+
+# bio variant: indices 0-4, non_bio variant: indices 5-9
+variant_idx=$((N / n_seed))
+seed_idx=$((N % n_seed))
+SEED=${seeds[$seed_idx]}
+
+if [ $variant_idx -eq 0 ]; then
+    VARIANT="bio"
+    BIODEG_FLAG=""
+else
+    VARIANT="non_bio"
+    BIODEG_FLAG="--no_biodeg"
+fi
+
+# Fixed parameters
 TARGET="FOM1_direct"
 MP_SOFT=-30
 MP_HARD=-10
@@ -41,17 +95,29 @@ TOX_THRESHOLD=3
 # ==============================
 # Setup output directory
 # ==============================
-output_dir="../outputs/fom1_direct_test"
+output_dir="../outputs/fom1_direct_test/${VARIANT}_seed${SEED}"
 mkdir -p "$output_dir"
 
-echo "========================================"
-echo "WSGA FOM1 Direct — Local Test (mol-rl)"
-echo "========================================"
-echo "Target:            $TARGET"
-echo "Population size:   $POP"
-echo "Generations:       $NUM_GENERATIONS"
-echo "Output:            $output_dir"
-echo "========================================"
+log_file="${output_dir}/config.log"
+echo "========================================" > "$log_file"
+echo "WSGA FOM1 Direct Prediction Run (mol-rl)" >> "$log_file"
+echo "========================================" >> "$log_file"
+echo "Array index:       $N" >> "$log_file"
+echo "Variant:           $VARIANT" >> "$log_file"
+echo "Target:            $TARGET" >> "$log_file"
+echo "Population size:   $POP" >> "$log_file"
+echo "Mutation rate:     $MR" >> "$log_file"
+echo "Elitism rate:      $ER" >> "$log_file"
+echo "Best elite ratio:  $BER" >> "$log_file"
+echo "Tournament k:      $K" >> "$log_file"
+echo "Tau (niching):     $TAU" >> "$log_file"
+echo "Generations:       $NUM_GENERATIONS" >> "$log_file"
+echo "Seed label:        $SEED" >> "$log_file"
+echo "MP soft/hard:      ${MP_SOFT}/${MP_HARD}" >> "$log_file"
+echo "FP threshold:      $FP_THRESHOLD" >> "$log_file"
+echo "Biodeg flag:       ${BIODEG_FLAG:-(enabled)}" >> "$log_file"
+echo "Started at:        $(date)" >> "$log_file"
+echo "========================================" >> "$log_file"
 
 # ==============================
 # Run WSGA
@@ -75,17 +141,19 @@ python3 ../src/wsga.py \
     --fom1_model_dir ../training/FOM1_architecture_comparison/results \
     --data_dir ../data \
     --model_dir ../models \
-    --output_dir $output_dir
+    --output_dir $output_dir \
+    $BIODEG_FLAG \
+    2>&1 | tee -a "$log_file"
 
-exit_status=$?
+exit_status=${PIPESTATUS[0]}
 
-echo ""
-echo "Exit status: $exit_status"
+echo "" >> "$log_file"
+echo "Finished at: $(date)" >> "$log_file"
+echo "Exit status: $exit_status" >> "$log_file"
 
-if [ $exit_status -eq 0 ]; then
-    echo "Test PASSED - WSGA ran successfully with mol-rl env"
-else
-    echo "Test FAILED - check output above for errors"
-fi
+# List output files for verification
+echo "" >> "$log_file"
+echo "Output files:" >> "$log_file"
+ls -la "$output_dir"/ >> "$log_file" 2>&1
 
 exit $exit_status

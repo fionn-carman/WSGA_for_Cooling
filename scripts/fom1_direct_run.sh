@@ -6,6 +6,8 @@
 #PBS -o /dev/null
 #PBS -e /dev/null
 
+set -o pipefail
+
 # ============================================================
 # WSGA FOM1 Direct Prediction Run
 # ============================================================
@@ -143,10 +145,15 @@ python3 ../src/wsga.py \
     $BIODEG_FLAG \
     2>&1 | tee -a "$log_file"
 
-exit_status=$?
+exit_status=${PIPESTATUS[0]}
 
 echo "" >> "$log_file"
 echo "Finished at: $(date)" >> "$log_file"
 echo "Exit status: $exit_status" >> "$log_file"
+
+# List output files for verification
+echo "" >> "$log_file"
+echo "Output files:" >> "$log_file"
+ls -la "$output_dir"/ >> "$log_file" 2>&1
 
 exit $exit_status
