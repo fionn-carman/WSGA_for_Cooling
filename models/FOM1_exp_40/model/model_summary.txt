@@ -1,0 +1,46 @@
+============================================================
+XGBoost Shared-Test Model: FOM1_exp_40
+============================================================
+
+Trained: 2026-02-26 23:48:02
+Log transform: False
+Train samples: 725
+Test samples:  81
+
+Selected features: 21
+5-fold CV RMSE: 5.5265
+Test R2:        0.8066
+Test RMSE:      6.2724
+Test MAE:       4.1445
+80% PI coverage: 63.0%
+
+Best hyperparameters:
+  subsample: 0.7
+  n_estimators: 1000
+  min_child_weight: 4
+  max_depth: 3
+  learning_rate: 0.05
+  colsample_bytree: 0.7
+
+Features (21):
+  BCUT2D_CHGHI
+  BCUT2D_CHGLO
+  BCUT2D_LOGPLOW
+  BCUT2D_MRHI
+  Chi0
+  Chi2n
+  Chi3n
+  Chi4n
+  HallKierAlpha
+  Ipc
+  LabuteASA
+  PEOE_VSA7
+  SMR_VSA7
+  SMR_VSA9
+  SlogP_VSA3
+  EState_VSA6
+  EState_VSA8
+  VSA_EState3
+  VSA_EState4
+  NumRotatableBonds
+  RingCount

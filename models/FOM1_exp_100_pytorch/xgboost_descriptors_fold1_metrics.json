@@ -1,0 +1,18 @@
+{
+  "model": "xgboost_descriptors",
+  "target": "FOM1_100",
+  "fold": 1,
+  "r2": 0.8226347060461334,
+  "rmse": 5.445336280109829,
+  "mae": 3.8950419815147432,
+  "training_time_s": 468.1502559185028,
+  "best_params": {
+    "subsample": 0.8,
+    "n_estimators": 2000,
+    "min_child_weight": 1,
+    "max_depth": 3,
+    "learning_rate": 0.01,
+    "colsample_bytree": 1.0
+  },
+  "best_inner_cv_r2": 0.6161201576580592
+}
