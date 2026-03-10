@@ -638,7 +638,15 @@ def assign_validity(
     """
     invalid_fragment = df["SMILES"].apply(has_invalid_fragments)
     rdkit_invalid = df["SMILES"].apply(has_rdkit_valence_errors)
-    
+
+    # Check for radicals (unpaired electrons - not physically stable coolants)
+    def _has_radicals(smi):
+        mol = Chem.MolFromSmiles(smi) if smi else None
+        if mol is None:
+            return True
+        return Descriptors.NumRadicalElectrons(mol) > 0
+    has_radical = df["SMILES"].apply(_has_radicals)
+
     # Check for negative beta (physically impossible - would mean density increases with temp)
     negative_beta = (df["beta_40"] < 0) | (df["beta_100"] < 0)
 
@@ -649,10 +657,11 @@ def assign_validity(
         (df["BP-Measured"] >= bp_min) &
         (df["DC_exp"] <= dc_max) &
         (df["flashpoint"] >= min_fp) &
-        ((not use_biodeg) | (df["Biodegradable"] == True)) & 
+        ((not use_biodeg) | (df["Biodegradable"] == True)) &
         (df["Tox21_Score"] <= max_tox21) &
         (~invalid_fragment) &
         (~rdkit_invalid) &
+        (~has_radical) &
         (~negative_beta)
     )
 
