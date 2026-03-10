@@ -35,7 +35,7 @@ from wsga_helper import (
     load_tox21_models,
     load_biodeg_model,
 )
-from scscore.standalone_model_numpy import SCScorer
+from SCScorer import SCScorer
 
 print(f"descriptor_names: {len(descriptor_names)}")
 print(f"Unique descriptor_names: {len(set(descriptor_names))}")
