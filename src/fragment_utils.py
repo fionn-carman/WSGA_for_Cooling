@@ -3,6 +3,7 @@ import random
 import re
 from collections import Counter
 from rdkit import Chem
+from rdkit.Chem import RWMol, rdmolops
 
 def set_avoid_ring(_smiles):
     """
@@ -160,6 +161,164 @@ def crossover_fragments(smi1, smi2, cut_func, ring_safe=True, max_attempts=30, m
 
         except ValueError:
             continue
+
+    return None
+
+
+# ============================================================
+# Bond-Level Crossover (RDKit-based)
+# ============================================================
+
+def _get_breakable_bonds(mol):
+    """
+    Find single, non-ring bonds that can be broken for crossover.
+    Returns list of bond indices.
+    """
+    ring_info = mol.GetRingInfo()
+    breakable = []
+    for bond in mol.GetBonds():
+        if bond.GetBondType() != Chem.BondType.SINGLE:
+            continue
+        if ring_info.NumBondRings(bond.GetIdx()) > 0:
+            continue
+        # Skip bonds to hydrogen (shouldn't exist in SMILES but be safe)
+        a1 = bond.GetBeginAtom()
+        a2 = bond.GetEndAtom()
+        if a1.GetAtomicNum() == 1 or a2.GetAtomicNum() == 1:
+            continue
+        # Require both sides to have at least 2 heavy atoms
+        breakable.append(bond.GetIdx())
+    return breakable
+
+
+def _fragment_on_bond(mol, bond_idx):
+    """
+    Fragment a molecule on a single bond, returning two fragments as mol objects.
+    Uses dummy atoms (*) at the break points.
+    Returns (frag1, frag2) or None on failure.
+    """
+    try:
+        frags = Chem.FragmentOnBonds(mol, [bond_idx], addDummies=True)
+        frag_smiles = Chem.MolToSmiles(frags)
+        parts = frag_smiles.split(".")
+        if len(parts) != 2:
+            return None
+        mol1 = Chem.MolFromSmiles(parts[0])
+        mol2 = Chem.MolFromSmiles(parts[1])
+        if mol1 is None or mol2 is None:
+            return None
+        return mol1, mol2
+    except Exception:
+        return None
+
+
+def _join_fragments(frag1, frag2):
+    """
+    Join two fragments at their dummy atoms ([*] / atom number 0).
+    Returns a sanitised SMILES string or None on failure.
+    """
+    try:
+        combo = Chem.CombineMols(frag1, frag2)
+        rw = RWMol(combo)
+
+        # Find dummy atoms (atomic number 0)
+        dummies = [a.GetIdx() for a in rw.GetAtoms() if a.GetAtomicNum() == 0]
+        if len(dummies) < 2:
+            return None
+
+        # Pick one dummy from each original fragment
+        # After CombineMols, frag1 atoms come first, frag2 atoms second
+        n1 = frag1.GetNumAtoms()
+        d1 = [d for d in dummies if d < n1]
+        d2 = [d for d in dummies if d >= n1]
+        if not d1 or not d2:
+            return None
+
+        # Get the neighbor of each dummy (the real atom it's bonded to)
+        atom1_idx = d1[0]
+        atom2_idx = d2[0]
+
+        neighbors1 = [n.GetIdx() for n in rw.GetAtomWithIdx(atom1_idx).GetNeighbors()]
+        neighbors2 = [n.GetIdx() for n in rw.GetAtomWithIdx(atom2_idx).GetNeighbors()]
+        if not neighbors1 or not neighbors2:
+            return None
+
+        real1 = neighbors1[0]
+        real2 = neighbors2[0]
+
+        # Add bond between the real atoms
+        rw.AddBond(real1, real2, Chem.BondType.SINGLE)
+
+        # Remove dummy atoms (remove higher index first to preserve indices)
+        to_remove = sorted([atom1_idx, atom2_idx], reverse=True)
+        for idx in to_remove:
+            rw.RemoveAtom(idx)
+
+        mol = rw.GetMol()
+        Chem.SanitizeMol(mol)
+        smi = Chem.MolToSmiles(mol)
+
+        # Verify the result is a single connected molecule
+        if "." in smi:
+            return None
+
+        return smi
+    except Exception:
+        return None
+
+
+def crossover_mol_fragments(smi1, smi2, max_heavy_atoms=30, max_attempts=20):
+    """
+    Bond-level crossover: break one bond in each parent, recombine fragments.
+
+    Steps:
+    1. Convert parents to RDKit mol objects
+    2. Find breakable bonds (single, non-ring)
+    3. Randomly break one bond per parent to get 2 fragments each
+    4. Recombine: left of parent1 + right of parent2
+    5. Validate and return canonical SMILES
+
+    Returns canonical SMILES of child, or None if crossover fails.
+    """
+    mol1 = Chem.MolFromSmiles(smi1)
+    mol2 = Chem.MolFromSmiles(smi2)
+    if mol1 is None or mol2 is None:
+        return None
+
+    bonds1 = _get_breakable_bonds(mol1)
+    bonds2 = _get_breakable_bonds(mol2)
+
+    if not bonds1 or not bonds2:
+        return None
+
+    for _ in range(max_attempts):
+        b1 = random.choice(bonds1)
+        b2 = random.choice(bonds2)
+
+        result1 = _fragment_on_bond(mol1, b1)
+        result2 = _fragment_on_bond(mol2, b2)
+        if result1 is None or result2 is None:
+            continue
+
+        frag1_a, frag1_b = result1
+        frag2_a, frag2_b = result2
+
+        # Try 4 recombination options
+        for fa, fb in [(frag1_a, frag2_b), (frag1_b, frag2_a),
+                       (frag2_a, frag1_b), (frag2_b, frag1_a)]:
+            child_smi = _join_fragments(fa, fb)
+            if child_smi is None:
+                continue
+
+            child_mol = Chem.MolFromSmiles(child_smi)
+            if child_mol is None:
+                continue
+
+            n_heavy = child_mol.GetNumHeavyAtoms()
+            if n_heavy > max_heavy_atoms or n_heavy < 2:
+                continue
+
+            return Chem.MolToSmiles(child_mol)
 
     return None
 

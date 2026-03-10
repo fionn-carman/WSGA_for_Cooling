@@ -31,11 +31,12 @@ from wsga_helper import (
     assign_validity,
     compute_fitness,
     apply_mp_penalty,
+    apply_molprice_penalty,
     load_regression_models_with_aux,
     load_fom1_direct_models
 )
 from evaluation import get_scscore_cached, strict_canonicalize_smiles
-from fragment_utils import prepare_fragments, crossover_fragments
+from fragment_utils import prepare_fragments, crossover_fragments, crossover_mol_fragments
 from SCScorer import SCScorer
 from generate_molecules import generate_initial_population, load_combined_training_data
 
@@ -95,7 +96,15 @@ parser.add_argument("--fp_threshold", type=float, default=373, help="Min flash p
 parser.add_argument("--sc_threshold", type=float, default=3, help="Max SCScore")
 parser.add_argument("--tox_threshold", type=float, default=3, help="Max Tox21 score")
 parser.add_argument("--no_biodeg", action="store_true", help="Disable biodegradability filter")
+parser.add_argument("--molprice_model", type=str, default=None,
+    help="Path to MolPrice model weights (.pkl). Enables MolPrice cost penalty.")
+parser.add_argument("--molprice_soft", type=float, default=3.0,
+    help="MolPrice soft threshold (log USD/mmol) - no penalty below this")
+parser.add_argument("--molprice_hard", type=float, default=6.0,
+    help="MolPrice hard threshold (log USD/mmol) - zero fitness at/above this")
 parser.add_argument("--tournament_k", type=int, default=3, help="Tournament selection size (k)")
+parser.add_argument("--use_string_crossover", action="store_true",
+    help="Use old string-level crossover instead of bond-level crossover")
 parser.add_argument("--best_elite_ratio", type=float, default=0.3,
     help="Fraction of elites selected by raw FitnessScore (rest by NichedFitnessScore)")
 
@@ -164,6 +173,10 @@ MIN_FLASHPOINT = args.fp_threshold    # Min flash point (K)
 MAX_SCSCORE = args.sc_threshold       # Max synthetic complexity
 MAX_TOX21 = args.tox_threshold        # Max toxicity score
 USE_BIODEG_FILTER = not args.no_biodeg
+USE_STRING_CROSSOVER = args.use_string_crossover
+MOLPRICE_MODEL_PATH = args.molprice_model
+MOLPRICE_SOFT = args.molprice_soft
+MOLPRICE_HARD = args.molprice_hard
 
 # Structural Constraints
 MAX_HEAVY_ATOMS = 30
@@ -215,6 +228,12 @@ print(f"Flash point: {MIN_FLASHPOINT}K")
 print(f"SCScore max: {MAX_SCSCORE}")
 print(f"Tox21 max: {MAX_TOX21}")
 print(f"Biodeg filter: {USE_BIODEG_FILTER}")
+print(f"Crossover: {'string-level' if USE_STRING_CROSSOVER else 'bond-level (with string fallback)'}")
+print(f"--- MolPrice ---")
+print(f"MolPrice model: {MOLPRICE_MODEL_PATH}")
+if MOLPRICE_MODEL_PATH:
+    print(f"MolPrice soft threshold: {MOLPRICE_SOFT} log(USD/mmol)")
+    print(f"MolPrice hard threshold: {MOLPRICE_HARD} log(USD/mmol)")
 print(f"FOM1 model dir: {args.fom1_model_dir}")
 print(f"==============================================")
 
@@ -309,8 +328,9 @@ TRACKED_PROPERTIES = [
     'Pr_40', 'Pr_100', 'Pr_avg',
     'Gr_40', 'Gr_100', 'Gr_avg',
     'Nu_40', 'Nu_100', 'Nu_avg',
-    # Safety/Synthesis
+    # Safety/Synthesis/Cost
     'SCScore', 'Tox21_Score', 'Biodegradable',
+    'MolPrice', 'MolPrice_Penalty',
     'MP-Measured', 'BP-Measured', 'DC_exp', 'flashpoint'
 ]
 
@@ -488,6 +508,13 @@ def main():
     biodeg_dir = os.path.join(MODEL_DIR, "biodegradability")
     biodeg_model = load_biodeg_model(biodeg_dir)
 
+    # MolPrice model (cost prediction)
+    molprice_model = None
+    if MOLPRICE_MODEL_PATH:
+        from molprice import MolPriceModel
+        molprice_model = MolPriceModel(MOLPRICE_MODEL_PATH)
+        print(f"Loaded MolPrice model from {MOLPRICE_MODEL_PATH}")
+
     # FOM1 direct prediction models (XGBoost+Descriptor ensemble)
     fom1_direct_models = None
     if TARGET in ("FOM1_direct", "FOM1_direct_40", "FOM1_direct_100"):
@@ -546,7 +573,8 @@ def main():
         sc_model=sc_model,
         tox21_models=tox21_models,
         biodeg_model=biodeg_model,
-        fom1_direct_models=fom1_direct_models
+        fom1_direct_models=fom1_direct_models,
+        molprice_model=molprice_model
     )
 
     evaluated_df = assign_validity(
@@ -562,6 +590,7 @@ def main():
 
     evaluated_df = compute_fitness(evaluated_df, TARGET, TARGET_CONFIG)
     evaluated_df = apply_mp_penalty(evaluated_df, soft_threshold=MP_SOFT, hard_threshold=MP_HARD)
+    evaluated_df = apply_molprice_penalty(evaluated_df, soft_threshold=MOLPRICE_SOFT, hard_threshold=MOLPRICE_HARD)
     evaluated_df = apply_niching(evaluated_df)
 
     # Select initial GA population
@@ -642,11 +671,18 @@ def main():
                 p1 = k_way_tournament(elite_df, k=TOURNAMENT_K)
                 p2 = k_way_tournament(elite_df, k=TOURNAMENT_K)
 
-                child = crossover_fragments(
-                    p1, p2,
-                    lambda smi, side: prepare_fragments(smi, side, limit_=FRAGMENT_LIMIT),
-                    max_heavy_atoms=MAX_HEAVY_ATOMS
-                )
+                child = None
+                if not USE_STRING_CROSSOVER:
+                    # Try bond-level crossover first
+                    child = crossover_mol_fragments(p1, p2, max_heavy_atoms=MAX_HEAVY_ATOMS)
+
+                if child is None:
+                    # Fallback to string-level crossover
+                    child = crossover_fragments(
+                        p1, p2,
+                        lambda smi, side: prepare_fragments(smi, side, limit_=FRAGMENT_LIMIT),
+                        max_heavy_atoms=MAX_HEAVY_ATOMS
+                    )
 
                 if not child:
                     continue
@@ -686,7 +722,8 @@ def main():
             sc_model=sc_model,
             tox21_models=tox21_models,
             biodeg_model=biodeg_model,
-            fom1_direct_models=fom1_direct_models
+            fom1_direct_models=fom1_direct_models,
+            molprice_model=molprice_model
         )
 
         evaluated_offspring_df = assign_validity(
@@ -702,6 +739,7 @@ def main():
 
         evaluated_offspring_df = compute_fitness(evaluated_offspring_df, TARGET, TARGET_CONFIG)
         evaluated_offspring_df = apply_mp_penalty(evaluated_offspring_df, soft_threshold=MP_SOFT, hard_threshold=MP_HARD)
+        evaluated_offspring_df = apply_molprice_penalty(evaluated_offspring_df, soft_threshold=MOLPRICE_SOFT, hard_threshold=MOLPRICE_HARD)
         # Note: Don't apply niching here - we'll do it on the combined population
 
         # ----- Update Seen SMILES -----
@@ -835,7 +873,8 @@ def main():
                             sc_model=sc_model,
                             tox21_models=tox21_models,
                             biodeg_model=biodeg_model,
-                            fom1_direct_models=fom1_direct_models
+                            fom1_direct_models=fom1_direct_models,
+                            molprice_model=molprice_model
                         )
                         fresh_evaluated = assign_validity(
                             fresh_evaluated,
@@ -849,6 +888,7 @@ def main():
                         )
                         fresh_evaluated = compute_fitness(fresh_evaluated, TARGET, TARGET_CONFIG)
                         fresh_evaluated = apply_mp_penalty(fresh_evaluated, soft_threshold=MP_SOFT, hard_threshold=MP_HARD)
+                        fresh_evaluated = apply_molprice_penalty(fresh_evaluated, soft_threshold=MOLPRICE_SOFT, hard_threshold=MOLPRICE_HARD)
                         
                         # Add to seen smiles
                         fresh_evaluated["CanonicalSMILES"] = fresh_evaluated["SMILES"].apply(strict_canonicalize_smiles)

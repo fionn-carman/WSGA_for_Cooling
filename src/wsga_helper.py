@@ -250,7 +250,7 @@ def apply_mutations_to_population(
     return out_df, seen_smiles
 
 
-def evaluate_molecules(df, thermo_models, sc_model, tox21_models, biodeg_model, drop_descriptors=True, fom1_direct_models=None):
+def evaluate_molecules(df, thermo_models, sc_model, tox21_models, biodeg_model, drop_descriptors=True, fom1_direct_models=None, molprice_model=None):
     """
     Evaluate molecules by predicting all thermophysical properties.
     
@@ -284,6 +284,12 @@ def evaluate_molecules(df, thermo_models, sc_model, tox21_models, biodeg_model, 
     # Predict SCScore
     # ----------------------------
     df["SCScore"] = df["SMILES"].apply(lambda smi: get_scscore_cached(sc_model, smi))
+
+    # ----------------------------
+    # Predict MolPrice (log USD/mmol)
+    # ----------------------------
+    if molprice_model is not None:
+        df["MolPrice"] = df["SMILES"].apply(molprice_model.predict)
 
     # ----------------------------
     # Predict Tox21 (using descriptors for new-style models)
@@ -500,7 +506,45 @@ def apply_mp_penalty(df, soft_threshold=-30, hard_threshold=-10):
     # Apply penalty to fitness
     df["MP_Penalty"] = penalty
     df["FitnessScore"] = df["FitnessScore"] * penalty
-    
+
+    return df
+
+
+def apply_molprice_penalty(df, soft_threshold=3.0, hard_threshold=6.0):
+    """
+    Apply soft penalty for MolPrice (log USD/mmol) between thresholds.
+
+    Uses the same cosine S-curve as apply_mp_penalty.
+
+    Penalty factor P:
+    - MolPrice <= soft_threshold: P = 1.0 (cheap, no penalty)
+    - MolPrice >= hard_threshold: P = 0.0 (too expensive, eliminated)
+    - Between: smooth cosine transition from 1 to 0
+
+    Args:
+        df: DataFrame with 'FitnessScore' and 'MolPrice' columns
+        soft_threshold: Below this, no penalty (default 0.0 log USD/mmol)
+        hard_threshold: At or above this, fitness = 0 (default 3.0 log USD/mmol)
+
+    Returns:
+        DataFrame with updated FitnessScore and new MolPrice_Penalty column
+    """
+    if "MolPrice" not in df.columns:
+        df["MolPrice_Penalty"] = 1.0
+        return df
+
+    mp = df["MolPrice"]
+    penalty = np.ones(len(df))
+
+    in_transition = (mp > soft_threshold) & (mp < hard_threshold)
+    t = (mp[in_transition] - soft_threshold) / (hard_threshold - soft_threshold)
+    penalty[in_transition] = (1 + np.cos(np.pi * t)) / 2
+
+    penalty[mp >= hard_threshold] = 0.0
+
+    df["MolPrice_Penalty"] = penalty
+    df["FitnessScore"] = df["FitnessScore"] * penalty
+
     return df
 
 

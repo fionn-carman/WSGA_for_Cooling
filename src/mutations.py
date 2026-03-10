@@ -2,7 +2,6 @@ import random
 from copy import deepcopy
 from rdkit import Chem
 from rdkit.Chem import Draw
-from rdkit.Chem.Draw import IPythonConsole
 import rdkit
 from rdkit.Chem import rdchem
 from rdkit.Chem import rdFMCS
