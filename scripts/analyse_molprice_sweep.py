@@ -576,8 +576,8 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
     # ------------------------------------------------------------------
     biodeg_values = sorted(combined["_biodeg"].unique())
     fig, axes = plt.subplots(1, len(biodeg_values),
-                             figsize=(10 * len(biodeg_values), 7),
-                             sharey=True, squeeze=False)
+                             figsize=(7 * len(biodeg_values), 7),
+                             sharex=True, sharey=True, squeeze=False)
 
     front_colors = ["#E63946", "#457B9D", "#2A9D8F"]
     base_front_colors = ["#F77F00", "#E9C46A", "#FFDAB9"]
@@ -600,13 +600,12 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
 
         afford = -wsga["MolPrice"].values
         fom1 = wsga["FOM1_avg"].values
-        fronts = _pareto_fronts(afford, fom1, n_fronts=3)
+        fronts = _pareto_fronts(afford, fom1, n_fronts=1)
 
         ax.scatter(afford, fom1, c="#CCCCCC", s=12, alpha=0.35,
                    edgecolors="none", zorder=1, label="WSGA molecules")
 
-        flabels = ["1st Pareto (WSGA)", "2nd Pareto (WSGA)",
-                   "3rd Pareto (WSGA)"]
+        flabels = ["Pareto front (WSGA)"]
         for i, fidx in enumerate(fronts):
             if len(fidx) == 0:
                 continue
@@ -631,10 +630,8 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
                            edgecolors="black", linewidths=0.4,
                            marker="D", zorder=2, label="FOM1 dataset")
 
-                bfronts = _pareto_fronts(ab, fb, n_fronts=3)
-                blabels = ["1st Pareto (FOM1 dataset)",
-                           "2nd Pareto (FOM1 dataset)",
-                           "3rd Pareto (FOM1 dataset)"]
+                bfronts = _pareto_fronts(ab, fb, n_fronts=1)
+                blabels = ["Pareto front (FOM1 dataset)"]
                 for i, bidx in enumerate(bfronts):
                     if len(bidx) == 0:
                         continue
@@ -649,6 +646,8 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
                       fontsize=12)
         if col_idx == 0:
             ax.set_ylabel("FOM1 (avg)", fontsize=12)
+        ax.set_xlim(left=-6)
+        ax.set_box_aspect(1)
         ax.legend(fontsize=7, loc="lower left")
         ax.tick_params(labelsize=10)
 
@@ -678,9 +677,6 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
                 csv_path, index=False)
             print(f"  Saved: {os.path.abspath(csv_path)}")
 
-    fig.suptitle("Cost vs FOM1 Pareto Fronts\n"
-                 "(all constraints, MP < \u221230 \u00b0C)",
-                 fontsize=14, y=1.02)
     fig.tight_layout()
     path = os.path.join(out_dir, "pareto_cost_vs_fom1.png")
     fig.savefig(path, dpi=300, bbox_inches="tight")
