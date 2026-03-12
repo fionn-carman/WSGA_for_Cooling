@@ -580,7 +580,7 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
                              sharex=True, sharey=True, squeeze=False)
 
     front_colors = ["#E63946", "#457B9D", "#2A9D8F"]
-    base_front_colors = ["#F77F00", "#E9C46A", "#FFDAB9"]
+    base_front_colors = ["#0B5394", "#E9C46A", "#FFDAB9"]
     save_cols = [smiles_col, "FOM1_40", "FOM1_100", "FOM1_avg", "MolPrice"]
     save_cols = [c for c in save_cols if c in combined.columns]
 
@@ -626,7 +626,7 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
             if len(bdf) > 0:
                 ab = -bdf["MolPrice"].values
                 fb = bdf["FOM1_exp_avg"].values
-                ax.scatter(ab, fb, c="#D62828", s=25, alpha=0.6,
+                ax.scatter(ab, fb, c="#1F77B4", s=25, alpha=0.6,
                            edgecolors="black", linewidths=0.4,
                            marker="D", zorder=2, label="FOM1 dataset")
 
