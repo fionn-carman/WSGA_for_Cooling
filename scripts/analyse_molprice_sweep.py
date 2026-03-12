@@ -17,12 +17,14 @@ Figures generated:
   2. Pareto front: FOM1 vs MolPrice (scatter, coloured by level)
   3. MolPrice distribution by threshold (box plot)
   4. Convergence curves by threshold level (separate panels for bio/nonbio)
+  5. Cost vs FOM1 Pareto fronts (1st/2nd/3rd) + baseline FOM1 dataset
 
 Usage:
     python analyse_molprice_sweep.py --sweep_dir ../outputs/molprice_sweep
 """
 
 import os
+import sys
 import re
 import argparse
 import warnings
@@ -118,6 +120,35 @@ def get_convergence_curve(valid_df):
     best_per_gen = best_per_gen.sort_index()
     running_best = best_per_gen.cummax()
     return running_best
+
+
+def _pareto_fronts(x, y, n_fronts=3):
+    """Compute successive Pareto fronts for maximising both x and y.
+
+    Returns a list of index arrays (into the original x, y), one per front.
+    """
+    remaining = np.ones(len(x), dtype=bool)
+    fronts = []
+    for _ in range(n_fronts):
+        idxs = np.where(remaining)[0]
+        if len(idxs) == 0:
+            break
+
+        xi, yi = x[idxs], y[idxs]
+        is_pareto = np.ones(len(idxs), dtype=bool)
+        for i in range(len(idxs)):
+            if not is_pareto[i]:
+                continue
+            dom = (xi >= xi[i]) & (yi >= yi[i]) & ((xi > xi[i]) | (yi > yi[i]))
+            dom[i] = False
+            if dom.any():
+                is_pareto[i] = False
+
+        front = idxs[is_pareto]
+        fronts.append(front)
+        remaining[front] = False
+
+    return fronts
 
 
 # ======================================================================
@@ -335,11 +366,147 @@ def plot_convergence_by_threshold(runs_df, sweep_dir, out_dir):
     print(f"  Saved: {os.path.abspath(path)}")
 
 
+def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
+                              baseline_csv=None, molprice_model_path=None):
+    """Cost vs FOM1 Pareto fronts: 1st/2nd/3rd WSGA + baseline comparison.
+
+    X-axis: −MolPrice (higher = cheaper).
+    Y-axis: FOM1_avg.
+    All molecules pass hard constraints + MP < −30 °C.
+    """
+    # ------------------------------------------------------------------
+    # 1. Collect all valid WSGA molecules (deduplicated)
+    # ------------------------------------------------------------------
+    all_mols = []
+    for _, run in runs_df.iterrows():
+        run_path = os.path.join(sweep_dir, run["dir"])
+        valid_df = load_all_evaluated(run_path)
+        if valid_df is None or "MolPrice" not in valid_df.columns:
+            continue
+        all_mols.append(valid_df)
+
+    if not all_mols:
+        print("  Skipping Pareto cost/FOM1 plot (no MolPrice data)")
+        return
+
+    combined = pd.concat(all_mols, ignore_index=True)
+    smiles_col = ("CanonicalSMILES" if "CanonicalSMILES" in combined.columns
+                  else "SMILES")
+    combined = combined.sort_values("FOM1_avg", ascending=False)
+    wsga = combined.drop_duplicates(subset=[smiles_col], keep="first").copy()
+    wsga = wsga.dropna(subset=["MolPrice", "FOM1_avg"])
+
+    afford_wsga = -wsga["MolPrice"].values
+    fom1_wsga = wsga["FOM1_avg"].values
+    wsga_fronts = _pareto_fronts(afford_wsga, fom1_wsga, n_fronts=3)
+
+    # ------------------------------------------------------------------
+    # 2. Baseline FOM1 dataset (optional)
+    # ------------------------------------------------------------------
+    baseline_ok = False
+    if baseline_csv and os.path.exists(baseline_csv):
+        base_df = pd.read_csv(baseline_csv)
+
+        # Apply same hard constraints as WSGA (where columns exist)
+        mask = pd.Series(True, index=base_df.index)
+        if "MP-Measured" in base_df.columns:
+            mask &= base_df["MP-Measured"] < -30
+        if "BP-Measured" in base_df.columns:
+            mask &= base_df["BP-Measured"] >= 100
+        if "DC_exp" in base_df.columns:
+            mask &= base_df["DC_exp"] <= 7
+        if "flashpoint" in base_df.columns:
+            mask &= base_df["flashpoint"] >= 423        # K  (150 °C)
+        if "Tox21_Score" in base_df.columns:
+            mask &= base_df["Tox21_Score"] <= 3
+
+        base_df = base_df[mask].copy()
+
+        if len(base_df) > 0 and molprice_model_path:
+            try:
+                _src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "..", "src")
+                if _src not in sys.path:
+                    sys.path.insert(0, _src)
+                from molprice import MolPriceModel
+
+                mp_model = MolPriceModel(molprice_model_path)
+                base_df["MolPrice"] = mp_model.predict_batch(
+                    base_df["SMILES"].tolist()
+                )
+                base_df = base_df.dropna(subset=["FOM1_exp_avg", "MolPrice"])
+
+                if len(base_df) > 0:
+                    afford_base = -base_df["MolPrice"].values
+                    fom1_base = base_df["FOM1_exp_avg"].values
+                    base_front = _pareto_fronts(afford_base, fom1_base,
+                                                n_fronts=1)
+                    baseline_ok = True
+                    print(f"  Baseline: {len(base_df)} molecules pass all "
+                          f"constraints")
+            except Exception as e:
+                print(f"  WARNING: could not load MolPrice model for "
+                      f"baseline: {e}")
+
+    # ------------------------------------------------------------------
+    # 3. Figure
+    # ------------------------------------------------------------------
+    fig, ax = plt.subplots(figsize=(10, 7))
+
+    # Background: all WSGA points
+    ax.scatter(afford_wsga, fom1_wsga,
+               c="#CCCCCC", s=12, alpha=0.35, edgecolors="none",
+               zorder=1, label="WSGA molecules")
+
+    # WSGA Pareto fronts (1st, 2nd, 3rd)
+    front_colors = ["#E63946", "#457B9D", "#2A9D8F"]
+    front_labels = ["1st Pareto front (WSGA)",
+                    "2nd Pareto front (WSGA)",
+                    "3rd Pareto front (WSGA)"]
+    for i, front_idx in enumerate(wsga_fronts):
+        if len(front_idx) == 0:
+            continue
+        fx = afford_wsga[front_idx]
+        fy = fom1_wsga[front_idx]
+        order = np.argsort(fx)
+        ax.plot(fx[order], fy[order], "o-",
+                color=front_colors[i], markersize=5, linewidth=1.5,
+                label=front_labels[i], zorder=5 - i)
+
+    # Baseline overlay
+    if baseline_ok:
+        ax.scatter(afford_base, fom1_base,
+                   c="#FFD166", s=20, alpha=0.5, edgecolors="none",
+                   marker="D", zorder=2, label="FOM1 dataset")
+
+        if base_front and len(base_front[0]) > 0:
+            bx = afford_base[base_front[0]]
+            by = fom1_base[base_front[0]]
+            order = np.argsort(bx)
+            ax.plot(bx[order], by[order], "D--",
+                    color="#F77F00", markersize=6, linewidth=1.5,
+                    label="Pareto front (FOM1 dataset)", zorder=6)
+
+    ax.set_xlabel("−MolPrice (−log $/mmol)  →  cheaper", fontsize=12)
+    ax.set_ylabel("FOM1 (avg)", fontsize=12)
+    ax.set_title("Cost vs FOM1 Pareto Fronts\n"
+                 "(all constraints, MP < −30 °C)", fontsize=14)
+    ax.legend(fontsize=9, loc="best")
+    ax.tick_params(labelsize=10)
+
+    fig.tight_layout()
+    path = os.path.join(out_dir, "pareto_cost_vs_fom1.png")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved: {os.path.abspath(path)}")
+
+
 # ======================================================================
 # Main analysis
 # ======================================================================
 
-def analyse_molprice_sweep(sweep_dir, top_n_molecules=50):
+def analyse_molprice_sweep(sweep_dir, top_n_molecules=50,
+                           baseline_csv=None, molprice_model=None):
 
     # ------------------------------------------------------------------
     # 1. Scan all run directories
@@ -481,6 +648,8 @@ def analyse_molprice_sweep(sweep_dir, top_n_molecules=50):
     plot_pareto_front(runs_df, sweep_dir, out_dir)
     plot_molprice_distribution(runs_df, sweep_dir, out_dir)
     plot_convergence_by_threshold(runs_df, sweep_dir, out_dir)
+    plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
+                              baseline_csv, molprice_model)
 
     print(f"\nDone.")
 
@@ -492,6 +661,13 @@ if __name__ == "__main__":
     parser.add_argument("--sweep_dir", type=str,
                         default="../outputs/molprice_sweep")
     parser.add_argument("--top_molecules", type=int, default=50)
+    parser.add_argument("--baseline_csv", type=str,
+                        default="../BaselineFOM1Eval/output/baseline_fom1_results.csv",
+                        help="Baseline FOM1 dataset CSV (experimental)")
+    parser.add_argument("--molprice_model", type=str,
+                        default="../models/MolPrice/MP_Morgan_hybrid.pkl",
+                        help="MolPrice model weights (.pkl)")
     args = parser.parse_args()
 
-    analyse_molprice_sweep(args.sweep_dir, args.top_molecules)
+    analyse_molprice_sweep(args.sweep_dir, args.top_molecules,
+                           args.baseline_csv, args.molprice_model)
