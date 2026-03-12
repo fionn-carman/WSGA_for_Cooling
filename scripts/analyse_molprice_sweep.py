@@ -81,6 +81,9 @@ def safe_read_csv(path):
         return None
 
 
+_LOADED_CACHE = {}
+
+
 def load_all_evaluated(run_path, mp_hard=-30):
     """Load all_evaluated_molecules.csv and filter to valid, MP-passing molecules.
 
@@ -90,12 +93,19 @@ def load_all_evaluated(run_path, mp_hard=-30):
       - pass the MP threshold      (MP-Measured < mp_hard, default −30 °C)
 
     Returns the filtered DataFrame (sorted by FOM1_avg descending) or None.
+    Results are cached so repeated calls with the same arguments are free.
     """
+    cache_key = (run_path, mp_hard)
+    if cache_key in _LOADED_CACHE:
+        return _LOADED_CACHE[cache_key]
+
     path = os.path.join(run_path, "all_evaluated_molecules.csv")
     if not os.path.exists(path):
+        _LOADED_CACHE[cache_key] = None
         return None
     df = safe_read_csv(path)
     if df is None:
+        _LOADED_CACHE[cache_key] = None
         return None
 
     mask = pd.Series(True, index=df.index)
@@ -108,10 +118,39 @@ def load_all_evaluated(run_path, mp_hard=-30):
 
     df = df.loc[mask].copy()
     if df.empty:
+        _LOADED_CACHE[cache_key] = None
         return None
 
     df = df.sort_values("FOM1_avg", ascending=False)
+    _LOADED_CACHE[cache_key] = df
     return df
+
+
+def load_top_tracking(run_path, mp_hard=-30):
+    """Load top_n_tracking.csv (much smaller/faster) with fallback to all_evaluated.
+
+    Returns filtered, deduplicated DataFrame sorted by FOM1_avg desc, or None.
+    """
+    tracking_path = os.path.join(run_path, "top_n_tracking.csv")
+    if os.path.exists(tracking_path):
+        df = safe_read_csv(tracking_path)
+        if df is not None and "FOM1_avg" in df.columns:
+            mask = pd.Series(True, index=df.index)
+            if "is_valid" in df.columns:
+                mask &= (df["is_valid"] == 1)
+            if "FitnessScore" in df.columns:
+                mask &= (df["FitnessScore"] > 0)
+            if "MP-Measured" in df.columns:
+                mask &= (df["MP-Measured"] < mp_hard)
+            df = df.loc[mask].copy()
+            if not df.empty:
+                df = df.sort_values("FOM1_avg", ascending=False)
+                smiles_col = ("CanonicalSMILES" if "CanonicalSMILES"
+                              in df.columns else "SMILES")
+                df = df.drop_duplicates(subset=[smiles_col], keep="first")
+                return df
+
+    return load_all_evaluated(run_path, mp_hard)
 
 
 def get_convergence_curve(valid_df):
@@ -139,10 +178,11 @@ def _pareto_fronts(x, y, n_fronts=3):
         for i in range(len(idxs)):
             if not is_pareto[i]:
                 continue
-            dom = (xi >= xi[i]) & (yi >= yi[i]) & ((xi > xi[i]) | (yi > yi[i]))
+            # Eliminate all points dominated by point i
+            dom = ((xi[i] >= xi) & (yi[i] >= yi)
+                   & ((xi[i] > xi) | (yi[i] > yi)))
             dom[i] = False
-            if dom.any():
-                is_pareto[i] = False
+            is_pareto[dom] = False
 
         front = idxs[is_pareto]
         fronts.append(front)
@@ -335,7 +375,7 @@ def plot_convergence_by_threshold(runs_df, sweep_dir, out_dir):
                 continue
 
             combined = pd.concat(all_curves, axis=1)
-            combined = combined.ffill()
+            combined = combined.ffill().bfill()
             mean_curve = combined.mean(axis=1)
             std_curve = combined.std(axis=1)
 
@@ -366,6 +406,55 @@ def plot_convergence_by_threshold(runs_df, sweep_dir, out_dir):
     print(f"  Saved: {os.path.abspath(path)}")
 
 
+def plot_pareto_table(pareto_df, smiles_col, out_dir):
+    """Table figure showing molecules on the 1st Pareto front."""
+    table_data = []
+    for i, (_, mol) in enumerate(pareto_df.iterrows(), 1):
+        smi = str(mol.get(smiles_col, ""))
+        if len(smi) > 50:
+            smi = smi[:47] + "..."
+        table_data.append([
+            str(i),
+            smi,
+            f"{mol.get('FOM1_40', np.nan):.1f}",
+            f"{mol.get('FOM1_100', np.nan):.1f}",
+            f"{mol.get('FOM1_avg', np.nan):.1f}",
+            f"{mol.get('MolPrice', np.nan):.2f}",
+        ])
+
+    col_labels = ["#", "SMILES", "FOM1 40\u00b0C", "FOM1 100\u00b0C",
+                  "FOM1 avg", "MolPrice"]
+    n_rows = len(table_data)
+    fig_height = max(2.5, 0.4 * n_rows + 1.5)
+    fig, ax = plt.subplots(figsize=(16, fig_height))
+    ax.axis("off")
+
+    tbl = ax.table(cellText=table_data, colLabels=col_labels,
+                   loc="center", cellLoc="center")
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(8)
+    tbl.auto_set_column_width(list(range(len(col_labels))))
+
+    for j in range(len(col_labels)):
+        tbl[0, j].set_facecolor("#4472C4")
+        tbl[0, j].set_text_props(color="white", weight="bold")
+
+    for i in range(1, n_rows + 1):
+        bg = "#F2F2F2" if i % 2 == 0 else "white"
+        for j in range(len(col_labels)):
+            tbl[i, j].set_facecolor(bg)
+
+    ax.set_title("1st Pareto Front Molecules (Cost vs FOM1)\n"
+                 "(all constraints, MP < \u221230 \u00b0C)",
+                 fontsize=12, pad=20)
+
+    fig.tight_layout()
+    path = os.path.join(out_dir, "pareto_front_molecules.png")
+    fig.savefig(path, dpi=200, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    print(f"  Saved: {os.path.abspath(path)}")
+
+
 def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
                               baseline_csv=None, molprice_model_path=None):
     """Cost vs FOM1 Pareto fronts: 1st/2nd/3rd WSGA + baseline comparison.
@@ -373,14 +462,17 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
     X-axis: −MolPrice (higher = cheaper).
     Y-axis: FOM1_avg.
     All molecules pass hard constraints + MP < −30 °C.
+
+    Uses top_n_tracking.csv (fast) when available, falling back to
+    all_evaluated_molecules.csv.
     """
     # ------------------------------------------------------------------
-    # 1. Collect all valid WSGA molecules (deduplicated)
+    # 1. Collect all valid WSGA molecules (deduplicated, fast path)
     # ------------------------------------------------------------------
     all_mols = []
     for _, run in runs_df.iterrows():
         run_path = os.path.join(sweep_dir, run["dir"])
-        valid_df = load_all_evaluated(run_path)
+        valid_df = load_top_tracking(run_path)
         if valid_df is None or "MolPrice" not in valid_df.columns:
             continue
         all_mols.append(valid_df)
@@ -405,9 +497,10 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
     # ------------------------------------------------------------------
     baseline_ok = False
     if baseline_csv and os.path.exists(baseline_csv):
+        print(f"  Loading baseline: {baseline_csv}")
         base_df = pd.read_csv(baseline_csv)
+        n_total = len(base_df)
 
-        # Apply same hard constraints as WSGA (where columns exist)
         mask = pd.Series(True, index=base_df.index)
         if "MP-Measured" in base_df.columns:
             mask &= base_df["MP-Measured"] < -30
@@ -421,32 +514,41 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
             mask &= base_df["Tox21_Score"] <= 3
 
         base_df = base_df[mask].copy()
+        print(f"  Baseline: {len(base_df)}/{n_total} pass constraints")
 
         if len(base_df) > 0 and molprice_model_path:
-            try:
-                _src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                    "..", "src")
-                if _src not in sys.path:
-                    sys.path.insert(0, _src)
-                from molprice import MolPriceModel
+            if not os.path.exists(molprice_model_path):
+                print(f"  WARNING: MolPrice model not found: "
+                      f"{molprice_model_path}")
+            else:
+                try:
+                    _src = os.path.join(
+                        os.path.dirname(os.path.abspath(__file__)),
+                        "..", "src")
+                    if _src not in sys.path:
+                        sys.path.insert(0, _src)
+                    from molprice import MolPriceModel
 
-                mp_model = MolPriceModel(molprice_model_path)
-                base_df["MolPrice"] = mp_model.predict_batch(
-                    base_df["SMILES"].tolist()
-                )
-                base_df = base_df.dropna(subset=["FOM1_exp_avg", "MolPrice"])
+                    mp_model = MolPriceModel(molprice_model_path)
+                    base_df["MolPrice"] = mp_model.predict_batch(
+                        base_df["SMILES"].tolist()
+                    )
+                    base_df = base_df.dropna(subset=["FOM1_exp_avg",
+                                                      "MolPrice"])
 
-                if len(base_df) > 0:
-                    afford_base = -base_df["MolPrice"].values
-                    fom1_base = base_df["FOM1_exp_avg"].values
-                    base_front = _pareto_fronts(afford_base, fom1_base,
-                                                n_fronts=1)
-                    baseline_ok = True
-                    print(f"  Baseline: {len(base_df)} molecules pass all "
-                          f"constraints")
-            except Exception as e:
-                print(f"  WARNING: could not load MolPrice model for "
-                      f"baseline: {e}")
+                    if len(base_df) > 0:
+                        afford_base = -base_df["MolPrice"].values
+                        fom1_base = base_df["FOM1_exp_avg"].values
+                        base_fronts = _pareto_fronts(afford_base, fom1_base,
+                                                     n_fronts=3)
+                        baseline_ok = True
+                        print(f"  Baseline: {len(base_df)} with MolPrice")
+                except Exception as e:
+                    print(f"  WARNING: MolPrice model error: {e}")
+        elif len(base_df) > 0:
+            print("  WARNING: no --molprice_model path provided")
+    elif baseline_csv:
+        print(f"  WARNING: baseline CSV not found: {baseline_csv}")
 
     # ------------------------------------------------------------------
     # 3. Figure
@@ -473,24 +575,31 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
                 color=front_colors[i], markersize=5, linewidth=1.5,
                 label=front_labels[i], zorder=5 - i)
 
-    # Baseline overlay
+    # Baseline overlay (1st/2nd/3rd Pareto fronts)
     if baseline_ok:
         ax.scatter(afford_base, fom1_base,
                    c="#FFD166", s=20, alpha=0.5, edgecolors="none",
                    marker="D", zorder=2, label="FOM1 dataset")
 
-        if base_front and len(base_front[0]) > 0:
-            bx = afford_base[base_front[0]]
-            by = fom1_base[base_front[0]]
+        base_front_colors = ["#F77F00", "#E9C46A", "#FFDAB9"]
+        base_front_labels = ["1st Pareto front (FOM1 dataset)",
+                             "2nd Pareto front (FOM1 dataset)",
+                             "3rd Pareto front (FOM1 dataset)"]
+        for i, front_idx in enumerate(base_fronts):
+            if len(front_idx) == 0:
+                continue
+            bx = afford_base[front_idx]
+            by = fom1_base[front_idx]
             order = np.argsort(bx)
             ax.plot(bx[order], by[order], "D--",
-                    color="#F77F00", markersize=6, linewidth=1.5,
-                    label="Pareto front (FOM1 dataset)", zorder=6)
+                    color=base_front_colors[i], markersize=5, linewidth=1.5,
+                    label=base_front_labels[i], zorder=6 - i)
 
-    ax.set_xlabel("−MolPrice (−log $/mmol)  →  cheaper", fontsize=12)
+    ax.set_xlabel("\u2212MolPrice (\u2212log $/mmol)  \u2192  cheaper",
+                  fontsize=12)
     ax.set_ylabel("FOM1 (avg)", fontsize=12)
     ax.set_title("Cost vs FOM1 Pareto Fronts\n"
-                 "(all constraints, MP < −30 °C)", fontsize=14)
+                 "(all constraints, MP < \u221230 \u00b0C)", fontsize=14)
     ax.legend(fontsize=9, loc="best")
     ax.tick_params(labelsize=10)
 
@@ -499,6 +608,20 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
     fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved: {os.path.abspath(path)}")
+
+    # ------------------------------------------------------------------
+    # 4. Pareto front table + CSV
+    # ------------------------------------------------------------------
+    if wsga_fronts and len(wsga_fronts[0]) > 0:
+        front1 = wsga.iloc[wsga_fronts[0]].sort_values("FOM1_avg",
+                                                         ascending=False)
+        plot_pareto_table(front1, smiles_col, out_dir)
+
+        save_cols = [smiles_col, "FOM1_40", "FOM1_100", "FOM1_avg", "MolPrice"]
+        save_cols = [c for c in save_cols if c in front1.columns]
+        csv_path = os.path.join(out_dir, "pareto_front_molecules.csv")
+        front1[save_cols].to_csv(csv_path, index=False)
+        print(f"  Saved: {os.path.abspath(csv_path)}")
 
 
 # ======================================================================
