@@ -612,7 +612,9 @@ def main():
     if os.path.exists(ALL_EVALUATED_PATH):
         os.remove(ALL_EVALUATED_PATH)
     os.makedirs(os.path.dirname(ALL_EVALUATED_PATH), exist_ok=True)
-    evaluated_df.to_csv(ALL_EVALUATED_PATH, mode='w', header=True, index=False)
+    # Fix column order for CSV — all subsequent appends must use this same order
+    CSV_COLUMNS = list(evaluated_df.columns)
+    evaluated_df[CSV_COLUMNS].to_csv(ALL_EVALUATED_PATH, mode='w', header=True, index=False)
 
     # ----- Initialize Elite Population (Hybrid Selection) -----
     # Remove duplicates first
@@ -776,7 +778,8 @@ def main():
         # Only save the offspring portion (they now have proper niched scores)
         offspring_with_niching = combined_df[combined_df['SMILES'].isin(evaluated_offspring_df['SMILES'])]
         offspring_with_niching["generation"] = gen
-        offspring_with_niching.to_csv(ALL_EVALUATED_PATH, mode='a', header=False, index=False)
+        # Reorder columns to match the header written at generation 0
+        offspring_with_niching[CSV_COLUMNS].to_csv(ALL_EVALUATED_PATH, mode='a', header=False, index=False)
 
         # ----- Track Top N for This Generation -----
         top_n_df = get_top_n_molecules(elite_df, TOP_N)
@@ -896,7 +899,11 @@ def main():
                         
                         # Save fresh molecules to CSV
                         fresh_evaluated["generation"] = gen
-                        fresh_evaluated.to_csv(ALL_EVALUATED_PATH, mode='a', header=False, index=False)
+                        # Reorder columns to match the header written at generation 0
+                        for col in CSV_COLUMNS:
+                            if col not in fresh_evaluated.columns:
+                                fresh_evaluated[col] = np.nan
+                        fresh_evaluated[CSV_COLUMNS].to_csv(ALL_EVALUATED_PATH, mode='a', header=False, index=False)
                         
                         # Combine kept elites with fresh molecules
                         combined_restart = pd.concat([elite_df_kept, fresh_evaluated], ignore_index=True)

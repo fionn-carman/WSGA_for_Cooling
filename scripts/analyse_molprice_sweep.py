@@ -470,8 +470,49 @@ def plot_pareto_table(front_dfs, smiles_col, out_dir, suffix="",
     print(f"  Saved: {os.path.abspath(path)}")
 
 
+def predict_fom1_for_smiles(smiles_list, fom1_model_dir):
+    """Predict FOM1 (40C, 100C, avg) for a list of SMILES using the direct
+    XGBoost+Descriptor ensemble models (same ones used in the WSGA)."""
+    _src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "..", "src")
+    if _src not in sys.path:
+        sys.path.insert(0, _src)
+    from wsga_helper import load_fom1_direct_models
+    from descriptors import descriptor_funcs, descriptor_names, calc_descriptors
+    from rdkit import Chem
+
+    fom1_models = load_fom1_direct_models(fom1_model_dir)
+
+    # Compute RDKit descriptors for all SMILES
+    desc_data = []
+    for smi in smiles_list:
+        mol = Chem.MolFromSmiles(smi)
+        desc_data.append(calc_descriptors(mol, descriptor_funcs))
+    desc_df = pd.DataFrame(desc_data, columns=descriptor_names)
+    for col in desc_df.columns:
+        desc_df[col] = pd.to_numeric(desc_df[col], errors="coerce")
+    desc_df = desc_df.fillna(0).replace([np.inf, -np.inf], 0)
+
+    results = {}
+    for temp_key, col_name in [("fom1_40", "FOM1_40C_pred"),
+                                ("fom1_100", "FOM1_100C_pred")]:
+        mdata = fom1_models[temp_key]
+        desc_cols = mdata["descriptor_columns"]
+        X_raw = desc_df[desc_cols].values
+        preds_all = []
+        for model, scaler in zip(mdata["models"], mdata["scalers"]):
+            X_scaled = scaler.transform(X_raw)
+            preds_all.append(model.predict(X_scaled))
+        results[col_name] = np.mean(preds_all, axis=0)
+
+    results["FOM1_pred_avg"] = (results["FOM1_40C_pred"] +
+                                 results["FOM1_100C_pred"]) / 2
+    return results
+
+
 def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
-                              baseline_csv=None, molprice_model_path=None):
+                              baseline_csv=None, molprice_model_path=None,
+                              fom1_model_dir=None):
     """Cost vs FOM1 Pareto fronts, separate panels for bio/nonbio.
 
     X-axis: −MolPrice (higher = cheaper).
@@ -561,6 +602,20 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
                     )
                     base_constrained = base_constrained.dropna(
                         subset=["FOM1_exp_avg", "MolPrice"])
+
+                    # Predict FOM1 using same direct models as WSGA
+                    if fom1_model_dir and os.path.isdir(fom1_model_dir):
+                        try:
+                            fom1_preds = predict_fom1_for_smiles(
+                                base_constrained["SMILES"].tolist(),
+                                fom1_model_dir)
+                            for k, v in fom1_preds.items():
+                                base_constrained[k] = v
+                            print(f"  Baseline: predicted FOM1 for "
+                                  f"{len(base_constrained)} molecules")
+                        except Exception as e:
+                            print(f"  WARNING: FOM1 prediction error: {e}")
+
                     if len(base_constrained) > 0:
                         base_df_all = base_constrained
                         print(f"  Baseline: {len(base_df_all)} with MolPrice")
@@ -625,21 +680,43 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
 
             if len(bdf) > 0:
                 ab = -bdf["MolPrice"].values
-                fb = bdf["FOM1_exp_avg"].values
-                ax.scatter(ab, fb, c="#1F77B4", s=25, alpha=0.6,
-                           edgecolors="black", linewidths=0.4,
-                           marker="D", zorder=2, label="FOM1 dataset")
 
-                bfronts = _pareto_fronts(ab, fb, n_fronts=1)
-                blabels = ["Pareto front (FOM1 dataset)"]
-                for i, bidx in enumerate(bfronts):
+                # Experimental FOM1 (ground truth)
+                fb_exp = bdf["FOM1_exp_avg"].values
+                ax.scatter(ab, fb_exp, c="#1F77B4", s=25, alpha=0.6,
+                           edgecolors="black", linewidths=0.4,
+                           marker="D", zorder=2,
+                           label="Baseline (experimental)")
+                bfronts_exp = _pareto_fronts(ab, fb_exp, n_fronts=1)
+                for bidx in bfronts_exp:
                     if len(bidx) == 0:
                         continue
-                    bx, by = ab[bidx], fb[bidx]
+                    bx, by = ab[bidx], fb_exp[bidx]
                     order = np.argsort(bx)
                     ax.plot(bx[order], by[order], "D--",
-                            color=base_front_colors[i], markersize=5,
-                            linewidth=1.5, label=blabels[i], zorder=6 - i)
+                            color=base_front_colors[0], markersize=5,
+                            linewidth=1.5,
+                            label="Pareto (baseline exp.)",
+                            zorder=6)
+
+                # Predicted FOM1 (same models as WSGA) — apples-to-apples
+                if "FOM1_pred_avg" in bdf.columns:
+                    fb_pred = bdf["FOM1_pred_avg"].values
+                    ax.scatter(ab, fb_pred, c="#FF7F0E", s=25, alpha=0.6,
+                               edgecolors="black", linewidths=0.4,
+                               marker="s", zorder=3,
+                               label="Baseline (predicted)")
+                    bfronts_pred = _pareto_fronts(ab, fb_pred, n_fronts=1)
+                    for bidx in bfronts_pred:
+                        if len(bidx) == 0:
+                            continue
+                        bx, by = ab[bidx], fb_pred[bidx]
+                        order = np.argsort(bx)
+                        ax.plot(bx[order], by[order], "s--",
+                                color="#CC5500", markersize=5,
+                                linewidth=1.5,
+                                label="Pareto (baseline pred.)",
+                                zorder=7)
 
         ax.set_title(title, fontsize=13)
         ax.set_xlabel("\u2212MolPrice (\u2212log $/mmol)  \u2192  cheaper",
@@ -689,7 +766,8 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
 # ======================================================================
 
 def analyse_molprice_sweep(sweep_dir, top_n_molecules=50,
-                           baseline_csv=None, molprice_model=None):
+                           baseline_csv=None, molprice_model=None,
+                           fom1_model_dir=None):
 
     # ------------------------------------------------------------------
     # 1. Scan all run directories
@@ -832,7 +910,7 @@ def analyse_molprice_sweep(sweep_dir, top_n_molecules=50,
     plot_molprice_distribution(runs_df, sweep_dir, out_dir)
     plot_convergence_by_threshold(runs_df, sweep_dir, out_dir)
     plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
-                              baseline_csv, molprice_model)
+                              baseline_csv, molprice_model, fom1_model_dir)
 
     print(f"\nDone.")
 
@@ -850,7 +928,11 @@ if __name__ == "__main__":
     parser.add_argument("--molprice_model", type=str,
                         default="../models/MolPrice/MP_Morgan_hybrid.pkl",
                         help="MolPrice model weights (.pkl)")
+    parser.add_argument("--fom1_model_dir", type=str,
+                        default="../training/FOM1_architecture_comparison/results",
+                        help="Directory with FOM1 direct prediction models")
     args = parser.parse_args()
 
     analyse_molprice_sweep(args.sweep_dir, args.top_molecules,
-                           args.baseline_csv, args.molprice_model)
+                           args.baseline_csv, args.molprice_model,
+                           args.fom1_model_dir)
