@@ -521,7 +521,26 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
             mask &= base_raw["Tox21_Score"] <= 3
 
         base_constrained = base_raw[mask].copy()
-        print(f"  Baseline: {len(base_constrained)}/{n_total} pass constraints")
+        print(f"  Baseline: {len(base_constrained)}/{n_total} pass numeric "
+              f"constraints")
+
+        # Apply banned fragments filter (vinyl ethers, acetals, etc.)
+        try:
+            _src = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "..", "src")
+            if _src not in sys.path:
+                sys.path.insert(0, _src)
+            from wsga_helper import has_invalid_fragments
+            n_pre = len(base_constrained)
+            frag_mask = ~base_constrained["SMILES"].apply(
+                has_invalid_fragments)
+            base_constrained = base_constrained[frag_mask].copy()
+            n_removed = n_pre - len(base_constrained)
+            if n_removed > 0:
+                print(f"  Baseline: removed {n_removed} with banned "
+                      f"fragments ({len(base_constrained)} remain)")
+        except Exception as e:
+            print(f"  WARNING: could not apply fragment filter: {e}")
 
         if len(base_constrained) > 0 and molprice_model_path:
             if not os.path.exists(molprice_model_path):
@@ -608,9 +627,9 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
             if len(bdf) > 0:
                 ab = -bdf["MolPrice"].values
                 fb = bdf["FOM1_exp_avg"].values
-                ax.scatter(ab, fb, c="#FFD166", s=20, alpha=0.5,
-                           edgecolors="none", marker="D", zorder=2,
-                           label="FOM1 dataset")
+                ax.scatter(ab, fb, c="#D62828", s=25, alpha=0.6,
+                           edgecolors="black", linewidths=0.4,
+                           marker="D", zorder=2, label="FOM1 dataset")
 
                 bfronts = _pareto_fronts(ab, fb, n_fronts=3)
                 blabels = ["1st Pareto (FOM1 dataset)",
