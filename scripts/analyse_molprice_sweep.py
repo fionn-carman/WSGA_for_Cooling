@@ -406,23 +406,35 @@ def plot_convergence_by_threshold(runs_df, sweep_dir, out_dir):
     print(f"  Saved: {os.path.abspath(path)}")
 
 
-def plot_pareto_table(pareto_df, smiles_col, out_dir):
-    """Table figure showing molecules on the 1st Pareto front."""
-    table_data = []
-    for i, (_, mol) in enumerate(pareto_df.iterrows(), 1):
-        smi = str(mol.get(smiles_col, ""))
-        if len(smi) > 50:
-            smi = smi[:47] + "..."
-        table_data.append([
-            str(i),
-            smi,
-            f"{mol.get('FOM1_40', np.nan):.1f}",
-            f"{mol.get('FOM1_100', np.nan):.1f}",
-            f"{mol.get('FOM1_avg', np.nan):.1f}",
-            f"{mol.get('MolPrice', np.nan):.2f}",
-        ])
+def plot_pareto_table(front_dfs, smiles_col, out_dir):
+    """Table figure showing molecules on the 1st/2nd/3rd Pareto fronts.
 
-    col_labels = ["#", "SMILES", "FOM1 40\u00b0C", "FOM1 100\u00b0C",
+    Parameters
+    ----------
+    front_dfs : list[DataFrame]
+        One DataFrame per Pareto front (already sorted by FOM1_avg desc).
+    """
+    front_colors = ["#E63946", "#457B9D", "#2A9D8F"]
+    front_bg = ["#FDEDEE", "#EDF2F7", "#EAF6F4"]
+    table_data = []
+    row_bg = []
+
+    for fi, df in enumerate(front_dfs):
+        for _, mol in df.iterrows():
+            smi = str(mol.get(smiles_col, ""))
+            if len(smi) > 50:
+                smi = smi[:47] + "..."
+            table_data.append([
+                f"{fi + 1}",
+                smi,
+                f"{mol.get('FOM1_40', np.nan):.1f}",
+                f"{mol.get('FOM1_100', np.nan):.1f}",
+                f"{mol.get('FOM1_avg', np.nan):.1f}",
+                f"{mol.get('MolPrice', np.nan):.2f}",
+            ])
+            row_bg.append(front_bg[fi])
+
+    col_labels = ["Front", "SMILES", "FOM1 40\u00b0C", "FOM1 100\u00b0C",
                   "FOM1 avg", "MolPrice"]
     n_rows = len(table_data)
     fig_height = max(2.5, 0.4 * n_rows + 1.5)
@@ -440,11 +452,10 @@ def plot_pareto_table(pareto_df, smiles_col, out_dir):
         tbl[0, j].set_text_props(color="white", weight="bold")
 
     for i in range(1, n_rows + 1):
-        bg = "#F2F2F2" if i % 2 == 0 else "white"
         for j in range(len(col_labels)):
-            tbl[i, j].set_facecolor(bg)
+            tbl[i, j].set_facecolor(row_bg[i - 1])
 
-    ax.set_title("1st Pareto Front Molecules (Cost vs FOM1)\n"
+    ax.set_title("Pareto Front Molecules (Cost vs FOM1)\n"
                  "(all constraints, MP < \u221230 \u00b0C)",
                  fontsize=12, pad=20)
 
@@ -509,7 +520,7 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
         if "DC_exp" in base_df.columns:
             mask &= base_df["DC_exp"] <= 7
         if "flashpoint" in base_df.columns:
-            mask &= base_df["flashpoint"] >= 423        # K  (150 °C)
+            mask &= base_df["flashpoint"] >= 373.15     # K  (100 °C)
         if "Tox21_Score" in base_df.columns:
             mask &= base_df["Tox21_Score"] <= 3
 
@@ -613,14 +624,26 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
     # 4. Pareto front table + CSV
     # ------------------------------------------------------------------
     if wsga_fronts and len(wsga_fronts[0]) > 0:
-        front1 = wsga.iloc[wsga_fronts[0]].sort_values("FOM1_avg",
-                                                         ascending=False)
-        plot_pareto_table(front1, smiles_col, out_dir)
-
+        front_dfs = []
+        all_front_rows = []
         save_cols = [smiles_col, "FOM1_40", "FOM1_100", "FOM1_avg", "MolPrice"]
-        save_cols = [c for c in save_cols if c in front1.columns]
+        save_cols = [c for c in save_cols if c in wsga.columns]
+
+        for fi, front_idx in enumerate(wsga_fronts):
+            if len(front_idx) == 0:
+                continue
+            df_i = wsga.iloc[front_idx].sort_values("FOM1_avg",
+                                                     ascending=False)
+            front_dfs.append(df_i)
+            tmp = df_i[save_cols].copy()
+            tmp.insert(0, "front", fi + 1)
+            all_front_rows.append(tmp)
+
+        plot_pareto_table(front_dfs, smiles_col, out_dir)
+
         csv_path = os.path.join(out_dir, "pareto_front_molecules.csv")
-        front1[save_cols].to_csv(csv_path, index=False)
+        pd.concat(all_front_rows, ignore_index=True).to_csv(csv_path,
+                                                              index=False)
         print(f"  Saved: {os.path.abspath(csv_path)}")
 
 
