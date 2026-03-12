@@ -406,15 +406,19 @@ def plot_convergence_by_threshold(runs_df, sweep_dir, out_dir):
     print(f"  Saved: {os.path.abspath(path)}")
 
 
-def plot_pareto_table(front_dfs, smiles_col, out_dir):
+def plot_pareto_table(front_dfs, smiles_col, out_dir, suffix="",
+                      title_extra=""):
     """Table figure showing molecules on the 1st/2nd/3rd Pareto fronts.
 
     Parameters
     ----------
     front_dfs : list[DataFrame]
         One DataFrame per Pareto front (already sorted by FOM1_avg desc).
+    suffix : str
+        Appended to filename, e.g. "_bio" → pareto_front_molecules_bio.png
+    title_extra : str
+        Extra text for the title, e.g. " — Biodegradable"
     """
-    front_colors = ["#E63946", "#457B9D", "#2A9D8F"]
     front_bg = ["#FDEDEE", "#EDF2F7", "#EAF6F4"]
     table_data = []
     row_bg = []
@@ -432,7 +436,7 @@ def plot_pareto_table(front_dfs, smiles_col, out_dir):
                 f"{mol.get('FOM1_avg', np.nan):.1f}",
                 f"{mol.get('MolPrice', np.nan):.2f}",
             ])
-            row_bg.append(front_bg[fi])
+            row_bg.append(front_bg[min(fi, len(front_bg) - 1)])
 
     col_labels = ["Front", "SMILES", "FOM1 40\u00b0C", "FOM1 100\u00b0C",
                   "FOM1 avg", "MolPrice"]
@@ -455,12 +459,12 @@ def plot_pareto_table(front_dfs, smiles_col, out_dir):
         for j in range(len(col_labels)):
             tbl[i, j].set_facecolor(row_bg[i - 1])
 
-    ax.set_title("Pareto Front Molecules (Cost vs FOM1)\n"
+    ax.set_title(f"Pareto Front Molecules (Cost vs FOM1){title_extra}\n"
                  "(all constraints, MP < \u221230 \u00b0C)",
                  fontsize=12, pad=20)
 
     fig.tight_layout()
-    path = os.path.join(out_dir, "pareto_front_molecules.png")
+    path = os.path.join(out_dir, f"pareto_front_molecules{suffix}.png")
     fig.savefig(path, dpi=200, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"  Saved: {os.path.abspath(path)}")
@@ -468,17 +472,14 @@ def plot_pareto_table(front_dfs, smiles_col, out_dir):
 
 def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
                               baseline_csv=None, molprice_model_path=None):
-    """Cost vs FOM1 Pareto fronts: 1st/2nd/3rd WSGA + baseline comparison.
+    """Cost vs FOM1 Pareto fronts, separate panels for bio/nonbio.
 
     X-axis: −MolPrice (higher = cheaper).
     Y-axis: FOM1_avg.
     All molecules pass hard constraints + MP < −30 °C.
-
-    Uses top_n_tracking.csv (fast) when available, falling back to
-    all_evaluated_molecules.csv.
     """
     # ------------------------------------------------------------------
-    # 1. Collect all valid WSGA molecules (deduplicated, fast path)
+    # 1. Collect molecules tagged with biodeg setting
     # ------------------------------------------------------------------
     all_mols = []
     for _, run in runs_df.iterrows():
@@ -486,6 +487,8 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
         valid_df = load_all_evaluated(run_path)
         if valid_df is None or "MolPrice" not in valid_df.columns:
             continue
+        valid_df = valid_df.copy()
+        valid_df["_biodeg"] = run["biodeg"]
         all_mols.append(valid_df)
 
     if not all_mols:
@@ -495,39 +498,32 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
     combined = pd.concat(all_mols, ignore_index=True)
     smiles_col = ("CanonicalSMILES" if "CanonicalSMILES" in combined.columns
                   else "SMILES")
-    combined = combined.sort_values("FOM1_avg", ascending=False)
-    wsga = combined.drop_duplicates(subset=[smiles_col], keep="first").copy()
-    wsga = wsga.dropna(subset=["MolPrice", "FOM1_avg"])
-
-    afford_wsga = -wsga["MolPrice"].values
-    fom1_wsga = wsga["FOM1_avg"].values
-    wsga_fronts = _pareto_fronts(afford_wsga, fom1_wsga, n_fronts=3)
 
     # ------------------------------------------------------------------
-    # 2. Baseline FOM1 dataset (optional)
+    # 2. Load baseline (once, split by biodeg later)
     # ------------------------------------------------------------------
-    baseline_ok = False
+    base_df_all = None
     if baseline_csv and os.path.exists(baseline_csv):
         print(f"  Loading baseline: {baseline_csv}")
-        base_df = pd.read_csv(baseline_csv)
-        n_total = len(base_df)
+        base_raw = pd.read_csv(baseline_csv)
+        n_total = len(base_raw)
 
-        mask = pd.Series(True, index=base_df.index)
-        if "MP-Measured" in base_df.columns:
-            mask &= base_df["MP-Measured"] < -30
-        if "BP-Measured" in base_df.columns:
-            mask &= base_df["BP-Measured"] >= 100
-        if "DC_exp" in base_df.columns:
-            mask &= base_df["DC_exp"] <= 7
-        if "flashpoint" in base_df.columns:
-            mask &= base_df["flashpoint"] >= 373.15     # K  (100 °C)
-        if "Tox21_Score" in base_df.columns:
-            mask &= base_df["Tox21_Score"] <= 3
+        mask = pd.Series(True, index=base_raw.index)
+        if "MP-Measured" in base_raw.columns:
+            mask &= base_raw["MP-Measured"] < -30
+        if "BP-Measured" in base_raw.columns:
+            mask &= base_raw["BP-Measured"] >= 100
+        if "DC_exp" in base_raw.columns:
+            mask &= base_raw["DC_exp"] <= 7
+        if "flashpoint" in base_raw.columns:
+            mask &= base_raw["flashpoint"] >= 373.15     # K  (100 °C)
+        if "Tox21_Score" in base_raw.columns:
+            mask &= base_raw["Tox21_Score"] <= 3
 
-        base_df = base_df[mask].copy()
-        print(f"  Baseline: {len(base_df)}/{n_total} pass constraints")
+        base_constrained = base_raw[mask].copy()
+        print(f"  Baseline: {len(base_constrained)}/{n_total} pass constraints")
 
-        if len(base_df) > 0 and molprice_model_path:
+        if len(base_constrained) > 0 and molprice_model_path:
             if not os.path.exists(molprice_model_path):
                 print(f"  WARNING: MolPrice model not found: "
                       f"{molprice_model_path}")
@@ -541,110 +537,136 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
                     from molprice import MolPriceModel
 
                     mp_model = MolPriceModel(molprice_model_path)
-                    base_df["MolPrice"] = mp_model.predict_batch(
-                        base_df["SMILES"].tolist()
+                    base_constrained["MolPrice"] = mp_model.predict_batch(
+                        base_constrained["SMILES"].tolist()
                     )
-                    base_df = base_df.dropna(subset=["FOM1_exp_avg",
-                                                      "MolPrice"])
-
-                    if len(base_df) > 0:
-                        afford_base = -base_df["MolPrice"].values
-                        fom1_base = base_df["FOM1_exp_avg"].values
-                        base_fronts = _pareto_fronts(afford_base, fom1_base,
-                                                     n_fronts=3)
-                        baseline_ok = True
-                        print(f"  Baseline: {len(base_df)} with MolPrice")
+                    base_constrained = base_constrained.dropna(
+                        subset=["FOM1_exp_avg", "MolPrice"])
+                    if len(base_constrained) > 0:
+                        base_df_all = base_constrained
+                        print(f"  Baseline: {len(base_df_all)} with MolPrice")
                 except Exception as e:
                     print(f"  WARNING: MolPrice model error: {e}")
-        elif len(base_df) > 0:
+        elif len(base_constrained) > 0:
             print("  WARNING: no --molprice_model path provided")
     elif baseline_csv:
         print(f"  WARNING: baseline CSV not found: {baseline_csv}")
 
     # ------------------------------------------------------------------
-    # 3. Figure
+    # 3. Figure: one panel per biodeg setting
     # ------------------------------------------------------------------
-    fig, ax = plt.subplots(figsize=(10, 7))
+    biodeg_values = sorted(combined["_biodeg"].unique())
+    fig, axes = plt.subplots(1, len(biodeg_values),
+                             figsize=(10 * len(biodeg_values), 7),
+                             sharey=True, squeeze=False)
 
-    # Background: all WSGA points
-    ax.scatter(afford_wsga, fom1_wsga,
-               c="#CCCCCC", s=12, alpha=0.35, edgecolors="none",
-               zorder=1, label="WSGA molecules")
-
-    # WSGA Pareto fronts (1st, 2nd, 3rd)
     front_colors = ["#E63946", "#457B9D", "#2A9D8F"]
-    front_labels = ["1st Pareto front (WSGA)",
-                    "2nd Pareto front (WSGA)",
-                    "3rd Pareto front (WSGA)"]
-    for i, front_idx in enumerate(wsga_fronts):
-        if len(front_idx) == 0:
+    base_front_colors = ["#F77F00", "#E9C46A", "#FFDAB9"]
+    save_cols = [smiles_col, "FOM1_40", "FOM1_100", "FOM1_avg", "MolPrice"]
+    save_cols = [c for c in save_cols if c in combined.columns]
+
+    for col_idx, biodeg in enumerate(biodeg_values):
+        ax = axes[0, col_idx]
+        title = "Biodegradable" if biodeg == "bio" else "Non-biodegradable"
+
+        # --- WSGA molecules for this biodeg setting ---
+        sub = combined[combined["_biodeg"] == biodeg].copy()
+        sub = sub.sort_values("FOM1_avg", ascending=False)
+        wsga = sub.drop_duplicates(subset=[smiles_col], keep="first")
+        wsga = wsga.dropna(subset=["MolPrice", "FOM1_avg"])
+
+        if wsga.empty:
+            ax.set_title(title, fontsize=13)
             continue
-        fx = afford_wsga[front_idx]
-        fy = fom1_wsga[front_idx]
-        order = np.argsort(fx)
-        ax.plot(fx[order], fy[order], "o-",
-                color=front_colors[i], markersize=5, linewidth=1.5,
-                label=front_labels[i], zorder=5 - i)
 
-    # Baseline overlay (1st/2nd/3rd Pareto fronts)
-    if baseline_ok:
-        ax.scatter(afford_base, fom1_base,
-                   c="#FFD166", s=20, alpha=0.5, edgecolors="none",
-                   marker="D", zorder=2, label="FOM1 dataset")
+        afford = -wsga["MolPrice"].values
+        fom1 = wsga["FOM1_avg"].values
+        fronts = _pareto_fronts(afford, fom1, n_fronts=3)
 
-        base_front_colors = ["#F77F00", "#E9C46A", "#FFDAB9"]
-        base_front_labels = ["1st Pareto front (FOM1 dataset)",
-                             "2nd Pareto front (FOM1 dataset)",
-                             "3rd Pareto front (FOM1 dataset)"]
-        for i, front_idx in enumerate(base_fronts):
-            if len(front_idx) == 0:
+        ax.scatter(afford, fom1, c="#CCCCCC", s=12, alpha=0.35,
+                   edgecolors="none", zorder=1, label="WSGA molecules")
+
+        flabels = ["1st Pareto (WSGA)", "2nd Pareto (WSGA)",
+                   "3rd Pareto (WSGA)"]
+        for i, fidx in enumerate(fronts):
+            if len(fidx) == 0:
                 continue
-            bx = afford_base[front_idx]
-            by = fom1_base[front_idx]
-            order = np.argsort(bx)
-            ax.plot(bx[order], by[order], "D--",
-                    color=base_front_colors[i], markersize=5, linewidth=1.5,
-                    label=base_front_labels[i], zorder=6 - i)
+            fx, fy = afford[fidx], fom1[fidx]
+            order = np.argsort(fx)
+            ax.plot(fx[order], fy[order], "o-", color=front_colors[i],
+                    markersize=5, linewidth=1.5, label=flabels[i],
+                    zorder=5 - i)
 
-    ax.set_xlabel("\u2212MolPrice (\u2212log $/mmol)  \u2192  cheaper",
-                  fontsize=12)
-    ax.set_ylabel("FOM1 (avg)", fontsize=12)
-    ax.set_title("Cost vs FOM1 Pareto Fronts\n"
-                 "(all constraints, MP < \u221230 \u00b0C)", fontsize=14)
-    ax.legend(fontsize=9, loc="best")
-    ax.tick_params(labelsize=10)
+        # --- Baseline for this biodeg setting ---
+        if base_df_all is not None:
+            if biodeg == "bio":
+                bdf = base_df_all[
+                    base_df_all["Biodegradable"] == True].copy()
+            else:
+                bdf = base_df_all.copy()
 
+            if len(bdf) > 0:
+                ab = -bdf["MolPrice"].values
+                fb = bdf["FOM1_exp_avg"].values
+                ax.scatter(ab, fb, c="#FFD166", s=20, alpha=0.5,
+                           edgecolors="none", marker="D", zorder=2,
+                           label="FOM1 dataset")
+
+                bfronts = _pareto_fronts(ab, fb, n_fronts=3)
+                blabels = ["1st Pareto (FOM1 dataset)",
+                           "2nd Pareto (FOM1 dataset)",
+                           "3rd Pareto (FOM1 dataset)"]
+                for i, bidx in enumerate(bfronts):
+                    if len(bidx) == 0:
+                        continue
+                    bx, by = ab[bidx], fb[bidx]
+                    order = np.argsort(bx)
+                    ax.plot(bx[order], by[order], "D--",
+                            color=base_front_colors[i], markersize=5,
+                            linewidth=1.5, label=blabels[i], zorder=6 - i)
+
+        ax.set_title(title, fontsize=13)
+        ax.set_xlabel("\u2212MolPrice (\u2212log $/mmol)  \u2192  cheaper",
+                      fontsize=12)
+        if col_idx == 0:
+            ax.set_ylabel("FOM1 (avg)", fontsize=12)
+        ax.legend(fontsize=7, loc="lower left")
+        ax.tick_params(labelsize=10)
+
+        # --- Table + CSV for this biodeg setting ---
+        if fronts and len(fronts[0]) > 0:
+            front_dfs = []
+            all_front_rows = []
+            for fi, fidx in enumerate(fronts):
+                if len(fidx) == 0:
+                    continue
+                df_i = wsga.iloc[fidx].sort_values("FOM1_avg",
+                                                     ascending=False)
+                front_dfs.append(df_i)
+                tmp = df_i[save_cols].copy()
+                tmp.insert(0, "front", fi + 1)
+                all_front_rows.append(tmp)
+
+            title_extra = (" \u2014 " +
+                           ("Biodegradable" if biodeg == "bio"
+                            else "Non-biodegradable"))
+            plot_pareto_table(front_dfs, smiles_col, out_dir,
+                              suffix=f"_{biodeg}", title_extra=title_extra)
+
+            csv_path = os.path.join(out_dir,
+                                    f"pareto_front_molecules_{biodeg}.csv")
+            pd.concat(all_front_rows, ignore_index=True).to_csv(
+                csv_path, index=False)
+            print(f"  Saved: {os.path.abspath(csv_path)}")
+
+    fig.suptitle("Cost vs FOM1 Pareto Fronts\n"
+                 "(all constraints, MP < \u221230 \u00b0C)",
+                 fontsize=14, y=1.02)
     fig.tight_layout()
     path = os.path.join(out_dir, "pareto_cost_vs_fom1.png")
     fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved: {os.path.abspath(path)}")
-
-    # ------------------------------------------------------------------
-    # 4. Pareto front table + CSV
-    # ------------------------------------------------------------------
-    if wsga_fronts and len(wsga_fronts[0]) > 0:
-        front_dfs = []
-        all_front_rows = []
-        save_cols = [smiles_col, "FOM1_40", "FOM1_100", "FOM1_avg", "MolPrice"]
-        save_cols = [c for c in save_cols if c in wsga.columns]
-
-        for fi, front_idx in enumerate(wsga_fronts):
-            if len(front_idx) == 0:
-                continue
-            df_i = wsga.iloc[front_idx].sort_values("FOM1_avg",
-                                                     ascending=False)
-            front_dfs.append(df_i)
-            tmp = df_i[save_cols].copy()
-            tmp.insert(0, "front", fi + 1)
-            all_front_rows.append(tmp)
-
-        plot_pareto_table(front_dfs, smiles_col, out_dir)
-
-        csv_path = os.path.join(out_dir, "pareto_front_molecules.csv")
-        pd.concat(all_front_rows, ignore_index=True).to_csv(csv_path,
-                                                              index=False)
-        print(f"  Saved: {os.path.abspath(csv_path)}")
 
 
 # ======================================================================
