@@ -320,8 +320,8 @@ def plot_molprice_distribution(runs_df, sweep_dir, out_dir):
 
     box_data = [plot_df[plot_df["level"] == l]["MolPrice"].dropna().values
                 for l in present_levels]
-    bp = ax.boxplot(box_data, labels=[LEVEL_DESCRIPTIONS.get(l, l)
-                                       for l in present_levels],
+    bp = ax.boxplot(box_data, tick_labels=[LEVEL_DESCRIPTIONS.get(l, l)
+                                           for l in present_levels],
                     patch_artist=True, showfliers=True)
 
     cmap = plt.cm.viridis
@@ -472,7 +472,7 @@ def plot_pareto_cost_vs_fom1(runs_df, sweep_dir, out_dir,
     all_mols = []
     for _, run in runs_df.iterrows():
         run_path = os.path.join(sweep_dir, run["dir"])
-        valid_df = load_top_tracking(run_path)
+        valid_df = load_all_evaluated(run_path)
         if valid_df is None or "MolPrice" not in valid_df.columns:
             continue
         all_mols.append(valid_df)
