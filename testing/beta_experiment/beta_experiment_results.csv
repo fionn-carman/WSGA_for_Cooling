@@ -1,4 +1,0 @@
-Strategy,FOM1_40 R²,FOM1_40 MAE,FOM1_100 R²,FOM1_100 MAE,FOM1_avg R²,FOM1_avg MAE
-Pipeline (current),0.6944,5.11,0.6271,6.20,0.7102,5.35
-Direct beta,0.7773,4.25,0.7901,4.79,0.8311,4.17
-Direct delta_rho,0.7731,4.14,0.7997,4.61,0.8366,4.04
