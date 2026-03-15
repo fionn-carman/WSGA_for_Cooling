@@ -35,14 +35,11 @@ def get_scscore_cached(sc_model, smi):
     _scscore_cache[smi] = score
     return score
 
-#from gt4sd.properties import PropertyPredictorRegistry
-
-def Toxicity(MOLSMILES):
-    tox21 = PropertyPredictorRegistry.get_property_predictor('tox21', {'algorithm_version': 'v0'})
-    Partial_Result = tox21(MOLSMILES)
-    Result = sum(Partial_Result)
-    ToxNorm = Result/5
-    return ToxNorm
+def Toxicity(smiles, model_path="../models/tox21_gt4sd"):
+    """Standalone Tox21 score (sum of 12 endpoint probabilities, range 0-12)."""
+    from tox21_gt4sd import Tox21Predictor
+    predictor = Tox21Predictor(model_path)
+    return sum(predictor(smiles))
 
 # === Model loading ===
 

@@ -25,7 +25,7 @@ from wsga_helper import (
     apply_mutations_to_population,
     evaluate_molecules,
     k_way_tournament,
-    load_tox21_models,
+    load_tox21_predictor,
     load_biodeg_model,
     apply_niching,
     assign_validity,
@@ -500,9 +500,9 @@ def main():
     sc_model = SCScorer()
     sc_model.restore(os.path.join(MODEL_DIR, "SCScorer/scscore/models/full_reaxys_model_1024bool/model.ckpt-10654.as_numpy.json.gz"))
 
-    # Tox21 models (classification)
-    tox21_dir = os.path.join(MODEL_DIR, "tox21")
-    tox21_models = load_tox21_models(tox21_dir)
+    # Tox21 predictor (PaccMann MCA from GT4SD model hub)
+    tox21_dir = os.path.join(MODEL_DIR, "tox21_gt4sd")
+    tox21_models = load_tox21_predictor(tox21_dir)
 
     # Biodegradability model (classification)
     biodeg_dir = os.path.join(MODEL_DIR, "biodegradability")

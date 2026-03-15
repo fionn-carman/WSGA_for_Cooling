@@ -22,3 +22,11 @@ dependencies:
     - accelerate
     - stable-baselines3
     - umap-learn
+    - ipython
+    - minio
+    - "pytoda>=1.1.2"
+    - "paccmann_predictor @ git+https://github.com/PaccMann/paccmann_predictor.git"
+    - "toxsmi @ git+https://github.com/PaccMann/chemical_representation_learning_for_toxicity_prediction.git"
+    # paccmann_generator must be installed separately with --no-deps due to
+    # a pytoda version conflict (it pins 0.1.1 but toxsmi needs >=1.1.2):
+    #   pip install --no-deps "paccmann_generator @ git+https://github.com/PaccMann/paccmann_generator.git"

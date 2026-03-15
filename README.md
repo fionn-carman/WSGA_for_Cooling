@@ -11,7 +11,7 @@ The algorithm incorporates:
 - **Adaptive mutation rate** that increases during stagnation to escape local optima
 - **Stagnation detection with restart** replacing a portion of the population with fresh n-gram-generated molecules
 - **Soft melting point penalty** providing a continuous fitness gradient rather than a hard threshold cutoff
-- **Biodegradability and toxicity filtering** via trained classifiers (Tox21 endpoints, RB-QSAR biodegradability)
+- **Biodegradability and toxicity filtering** via PaccMann MCA Tox21 predictor ([GT4SD](https://github.com/PaccMann/chemical_representation_learning_for_toxicity_prediction)) and RB-QSAR biodegradability classifier
 
 Property predictions are made by XGBoost models trained on curated experimental datasets with RDKit Morgan fingerprint descriptors and RFE feature selection.
 
@@ -27,6 +27,7 @@ wsga_clean/
 │   ├── generate_molecules.py   # N-gram SMILES model for initial populations
 │   ├── fragment_utils.py       # Fragment-based crossover
 │   ├── SCScorer.py             # Synthetic complexity scoring
+│   ├── tox21_gt4sd.py          # PaccMann MCA Tox21 toxicity predictor
 │   └── descriptors.py          # RDKit descriptor computation
 │
 ├── scripts/                    # HPC submission and analysis
@@ -56,7 +57,7 @@ wsga_clean/
 │   ├── DC_exp/
 │   ├── flashpoint/
 │   ├── biodegradability/
-│   ├── tox21/                  # 10+ Tox21 toxicity endpoint models
+│   ├── tox21_gt4sd/            # PaccMann MCA Tox21 model (download separately)
 │   └── SCScorer/               # Synthetic complexity model
 │
 ├── training/                   # Model training scripts
@@ -191,27 +192,58 @@ python analyse_hyperparam_sweep.py --sweep_dir ../outputs/hyperparam_sweep_stage
 
 ## Dependencies
 
-- Python 3.8+
+- Python 3.10
 - RDKit
 - XGBoost
 - scikit-learn
+- PyTorch
 - NumPy, Pandas, Matplotlib, Seaborn
 - UMAP-learn (for chemical space analysis)
+- pytoda, paccmann_predictor, toxsmi (for Tox21 toxicity prediction)
 - tqdm
 
 Install via conda:
 ```bash
-conda create -n rdkit_env -c conda-forge rdkit xgboost scikit-learn umap-learn matplotlib seaborn tqdm pandas
-conda activate rdkit_env
+conda env create -f environment.yml
+conda activate mol-rl
+# paccmann_generator must be installed separately (pytoda version conflict):
+pip install --no-deps "paccmann_generator @ git+https://github.com/PaccMann/paccmann_generator.git"
+```
+
+### Downloading Tox21 Model Weights
+
+The pretrained PaccMann MCA Tox21 weights are not tracked in git. Download them from the GT4SD model hub:
+
+```python
+from minio import Minio
+import os
+
+client = Minio(
+    's3.par01.cloud-object-storage.appdomain.cloud',
+    access_key='b087e6810a5d4246a64e07e36ace338f',
+    secret_key='ba4a1db5647a32c6109b58714befb7ea7145b983143e0836',
+)
+bucket = 'gt4sd-cos-properties-artifacts'
+prefix = 'molecules/MCA/Tox21/v0/'
+dest = 'models/tox21_gt4sd'
+for obj in client.list_objects(bucket, prefix=prefix, recursive=True):
+    rel = obj.object_name[len(prefix):]
+    if not rel:
+        continue
+    local_path = os.path.join(dest, rel)
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    client.fget_object(bucket, obj.object_name, local_path)
 ```
 
 ## Property Models
 
 XGBoost models are trained on curated experimental datasets using RDKit Morgan fingerprints (radius 2, 2048 bits) with recursive feature elimination. Each model directory contains the trained model, selected feature indices, and diagnostic plots (parity plots, SHAP feature importance).
 
-To retrain models:
+To retrain property models:
 ```bash
 cd training/
 bash train_all_regression.sh      # all 12 regression models
 bash train_all_classification.sh  # biodegradability classifier
 ```
+
+The Tox21 toxicity model is a pretrained PaccMann MCA neural network from the [GT4SD model hub](https://github.com/PaccMann/chemical_representation_learning_for_toxicity_prediction) and does not need retraining.

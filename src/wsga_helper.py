@@ -3,7 +3,7 @@ import pandas as pd
 import pickle
 import random
 from rdkit import Chem
-from rdkit.Chem import Draw, rdchem, MACCSkeys, Descriptors
+from rdkit.Chem import Draw, rdchem, Descriptors
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
@@ -292,7 +292,7 @@ def evaluate_molecules(df, thermo_models, sc_model, tox21_models, biodeg_model, 
         df["MolPrice"] = df["SMILES"].apply(molprice_model.predict)
 
     # ----------------------------
-    # Predict Tox21 (using descriptors for new-style models)
+    # Predict Tox21 (GT4SD PaccMann MCA)
     # ----------------------------
     df["Tox21_Score"] = predict_tox21_batch(df, tox21_models)
 
@@ -778,7 +778,7 @@ def TanimotoSimilarity(SMILES, SMILESList):
 
 
 # ============================================================
-# Tox21 Model Functions
+# Tox21 Model Functions (GT4SD)
 # ============================================================
 
 TOX21_TASKS = [
@@ -788,51 +788,25 @@ TOX21_TASKS = [
 ]
 
 
-def load_tox21_models(model_dir):
+def load_tox21_predictor(model_path):
     """
-    Load all Tox21 classification models from directory.
-    
-    Supports two directory structures:
-    1. Old style: model_dir/*.joblib (e.g., NR-AR.joblib)
-    2. New style: model_dir/{target}/model/xgb_model.joblib
+    Initialise the PaccMann MCA Tox21 toxicity predictor.
+
+    Uses the pretrained MCA (Multiscale Convolutional Attentive) model from
+    the GT4SD model hub, trained on the Tox21 challenge dataset (12 endpoints).
+    Weights are stored locally in models/tox21_gt4sd/.
+
+    Args:
+        model_path: Path to the tox21_gt4sd model directory containing
+                    model_params.json, smiles_language.pkl, and weights/.
+
+    Returns:
+        Tox21Predictor callable (SMILES -> list of 12 floats)
     """
-    models = {}
-    
-    # Check for old style first (flat directory with .joblib files)
-    old_style_files = [f for f in os.listdir(model_dir) if f.endswith(".joblib")]
-    
-    if old_style_files:
-        # Old style loading - raw models trained on MACCS fingerprints
-        for filename in sorted(old_style_files):
-            task_name = filename.replace(".joblib", "")
-            model_path = os.path.join(model_dir, filename)
-            models[task_name] = joblib.load(model_path)
-        print(f"Loaded {len(models)} Tox21 models (old style - MACCS fingerprints)")
-    else:
-        # New style loading (subdirectories) - models trained on RDKit descriptors
-        for task_name in TOX21_TASKS:
-            model_path = os.path.join(model_dir, task_name, "model", "xgb_model.joblib")
-            if os.path.exists(model_path):
-                try:
-                    model_data = joblib.load(model_path)
-                    # New style stores dict with 'model' and 'features' keys
-                    # IMPORTANT: Keep the full dict so we can access features for prediction
-                    if isinstance(model_data, dict) and 'model' in model_data:
-                        models[task_name] = {
-                            'model': model_data['model'],
-                            'features': model_data.get('features', [])
-                        }
-                    else:
-                        # Fallback if it's just a raw model
-                        models[task_name] = model_data
-                    print(f"  Loaded Tox21 model: {task_name}")
-                except Exception as e:
-                    print(f"  Warning: Could not load Tox21 model {task_name}: {e}")
-            else:
-                print(f"  Warning: Tox21 model not found: {model_path}")
-        print(f"Loaded {len(models)} Tox21 models (new style - RDKit descriptors)")
-    
-    return models
+    from tox21_gt4sd import Tox21Predictor
+    predictor = Tox21Predictor(model_path)
+    print("Loaded PaccMann MCA Tox21 predictor (12 endpoints)")
+    return predictor
 
 
 def load_biodeg_model(model_dir):
@@ -862,100 +836,27 @@ def load_biodeg_model(model_dir):
                             f"Expected either {old_path} or {new_path}")
 
 
-def smiles_to_maccs(smiles):
-    """Convert SMILES string to MACCS fingerprint vector."""
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        raise ValueError("Invalid SMILES string.")
-    fp = MACCSkeys.GenMACCSKeys(mol)
-    arr = np.zeros((167,), dtype=int)
-    Chem.DataStructs.ConvertToNumpyArray(fp, arr)
-    return arr.reshape(1, -1)
-
-
-def predict_tox21(smiles_str, models, threshold=0.5):
+def predict_tox21_batch(df, tox21_predictor):
     """
-    Predict Tox21 toxicity score as sum of positive class probabilities.
-    Lower is better (less toxic).
-    
-    NOTE: This function uses MACCS fingerprints for OLD-STYLE models only.
-    For new-style models trained on descriptors, use predict_tox21_batch instead.
-    """
-    mol = Chem.MolFromSmiles(smiles_str)
-    if mol is None:
-        return 12.0  # Max score for invalid molecules
+    Predict Tox21 scores for all molecules using the GT4SD predictor.
 
-    fp = MACCSkeys.GenMACCSKeys(mol)
-    arr = np.zeros((167,), dtype=int)
-    Chem.DataStructs.ConvertToNumpyArray(fp, arr)
-    x = arr.reshape(1, -1)
+    For each molecule the predictor returns 12 probabilities (one per Tox21
+    endpoint).  The score is their sum (range 0-12, lower = less toxic).
 
-    total_prob = 0.0
-    for model in models.values():
-        try:
-            prob = model.predict_proba(x)[0, 1]
-            total_prob += prob
-        except Exception:
-            # If model fails, add 0.5 (neutral contribution)
-            total_prob += 0.5
-
-    return total_prob
-
-
-def predict_tox21_batch(df, tox21_models):
-    """
-    Predict Tox21 scores for all molecules in a dataframe.
-    
-    Handles both old-style (MACCS fingerprints) and new-style (RDKit descriptors) models.
-    
     Args:
-        df: DataFrame with SMILES and descriptor columns
-        tox21_models: Dict of model name -> model data
-        
+        df: DataFrame with a SMILES column
+        tox21_predictor: GT4SD Tox21 property predictor (from load_tox21_predictor)
+
     Returns:
-        pd.Series of Tox21 scores (sum of probabilities across all targets)
+        pd.Series of Tox21 scores
     """
-    # Check if models are new-style (dict with 'features') or old-style (raw model)
-    first_model_data = list(tox21_models.values())[0]
-    is_new_style = isinstance(first_model_data, dict) and 'model' in first_model_data
-    
-    if not is_new_style:
-        # Old style: use MACCS fingerprints
-        return df["SMILES"].apply(lambda smi: predict_tox21(smi, tox21_models))
-    
-    # New style: use RDKit descriptors
     scores = []
-    n_targets = len(tox21_models)
-    
-    for idx in range(len(df)):
-        total_prob = 0.0
-        
-        for target_name, model_data in tox21_models.items():
-            model = model_data['model']
-            features = model_data.get('features', [])
-            
-            try:
-                # Build feature vector from dataframe row
-                X_values = []
-                for feat in features:
-                    if feat in df.columns:
-                        val = df.iloc[idx][feat]
-                        X_values.append(float(val) if pd.notna(val) else 0.0)
-                    else:
-                        X_values.append(0.0)
-                
-                X_row = np.array(X_values, dtype=np.float64).reshape(1, -1)
-                
-                # Predict probability of positive class
-                prob = model.predict_proba(X_row)[0, 1]
-                total_prob += prob
-                
-            except Exception as e:
-                # If prediction fails, add neutral probability
-                total_prob += 0.5
-        
-        scores.append(total_prob)
-    
+    for smi in df["SMILES"]:
+        try:
+            probs = tox21_predictor(smi)  # list of 12 floats
+            scores.append(sum(probs))
+        except Exception:
+            scores.append(12.0)  # worst-case for unparseable molecules
     return pd.Series(scores, index=df.index)
 
 

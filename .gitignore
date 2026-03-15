@@ -47,3 +47,9 @@ training/FOM1_architecture_comparison/figures/
 
 # ChemBERTa local model cache
 chemberta_model/
+
+# GT4SD Tox21 pretrained weights (download via minio, see README)
+models/tox21_gt4sd/
+
+# Claude Code
+CLAUDE.md
