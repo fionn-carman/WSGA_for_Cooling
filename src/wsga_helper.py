@@ -15,7 +15,7 @@ import time
 
 from mutations import mutate
 from descriptors import descriptor_funcs, descriptor_names, calc_descriptors
-from evaluation import load_models, get_scscore_cached, strict_canonicalize_smiles
+from evaluation import get_scscore_cached, strict_canonicalize_smiles
 
 
 def is_biodegradable(smiles, biodeg_model):
@@ -465,56 +465,9 @@ def compute_fitness(df, TARGET, TARGET_CONFIG):
     return df
 
 
-def apply_mp_penalty(df, soft_threshold=-30, hard_threshold=-10):
-    """
-    Apply soft penalty for melting point between soft and hard thresholds.
-    
-    Penalty factor P:
-    - MP <= soft_threshold (-30°C): P = 1.0 (no penalty)
-    - MP >= hard_threshold (-10°C): P = 0.0 (full penalty, molecule eliminated)
-    - soft_threshold < MP < hard_threshold: P decreases smoothly from 1 to 0
-    
-    Uses a smooth S-curve (cosine-based) for gradual transition.
-    
-    Args:
-        df: DataFrame with 'FitnessScore' and 'MP-Measured' columns
-        soft_threshold: Below this, no penalty (default -30°C)
-        hard_threshold: At or above this, fitness = 0 (default -10°C)
-    
-    Returns:
-        DataFrame with updated FitnessScore and new MP_Penalty column
-    """
-    mp = df["MP-Measured"]
-    
-    # Compute penalty factor
-    penalty = np.ones(len(df))
-    
-    # Region: soft < MP < hard - smooth transition
-    in_transition = (mp > soft_threshold) & (mp < hard_threshold)
-    
-    # Normalized position in transition zone (0 at soft, 1 at hard)
-    t = (mp[in_transition] - soft_threshold) / (hard_threshold - soft_threshold)
-    
-    # Smooth S-curve using cosine: P = (1 + cos(π*t)) / 2
-    # At t=0 (soft threshold): P = 1
-    # At t=1 (hard threshold): P = 0
-    penalty[in_transition] = (1 + np.cos(np.pi * t)) / 2
-    
-    # Region: MP >= hard - zero fitness
-    penalty[mp >= hard_threshold] = 0.0
-    
-    # Apply penalty to fitness
-    df["MP_Penalty"] = penalty
-    df["FitnessScore"] = df["FitnessScore"] * penalty
-
-    return df
-
-
 def apply_molprice_penalty(df, soft_threshold=3.0, hard_threshold=6.0):
     """
     Apply soft penalty for MolPrice (log USD/mmol) between thresholds.
-
-    Uses the same cosine S-curve as apply_mp_penalty.
 
     Penalty factor P:
     - MolPrice <= soft_threshold: P = 1.0 (cheap, no penalty)
@@ -667,7 +620,7 @@ def has_rdkit_valence_errors(smiles):
 def assign_validity(
     df,
     sc_threshold=3,
-    mp_max=-30,  # Kept for reference but NOT used in hard filter
+    mp_max=-30,
     bp_min=100,
     dc_max=7,
     min_fp=423,
@@ -677,8 +630,6 @@ def assign_validity(
     """
     Assign validity flag to molecules based on property thresholds
     and structural filters.
-    
-    NOTE: MP is NOT included here - it's handled by soft penalty separately.
     """
     invalid_fragment = df["SMILES"].apply(has_invalid_fragments)
     rdkit_invalid = df["SMILES"].apply(has_rdkit_valence_errors)
@@ -694,10 +645,9 @@ def assign_validity(
     # Check for negative beta (physically impossible - would mean density increases with temp)
     negative_beta = (df["beta_40"] < 0) | (df["beta_100"] < 0)
 
-    # MP removed from hard constraints - handled by soft penalty
     conditions = (
         (df["SCScore"] <= sc_threshold) &
-        # (df["MP-Measured"] <= mp_max) &  # REMOVED - now soft penalty
+        (df["MP-Measured"] <= mp_max) &
         (df["BP-Measured"] >= bp_min) &
         (df["DC_exp"] <= dc_max) &
         (df["flashpoint"] >= min_fp) &
@@ -874,7 +824,7 @@ def load_fom1_direct_models(fom1_model_dir):
 
     Args:
         fom1_model_dir: Path to the FOM1 architecture comparison results directory,
-                        e.g. training/FOM1_architecture_comparison/results
+                        e.g. testing/FOM1_architecture_comparison/results
 
     Returns:
         dict with keys 'fom1_40' and 'fom1_100', each containing:

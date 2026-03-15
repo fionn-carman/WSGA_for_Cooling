@@ -20,12 +20,6 @@ Thumbs.db
 # Runtime logs
 src/logs/
 
-# Locally stored results
-training/FOM1_architecture_comparison/results/
-
-# Generated figures
-training/FOM1_architecture_comparison/figures/
-
 # PBS job logs
 *.e[0-9]*
 *.o[0-9]*
@@ -50,6 +44,9 @@ chemberta_model/
 
 # GT4SD Tox21 pretrained weights (download via minio, see README)
 models/tox21_gt4sd/
+
+# Testing / experimental work (not part of the core pipeline)
+testing/
 
 # Claude Code
 CLAUDE.md

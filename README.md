@@ -10,7 +10,6 @@ The algorithm incorporates:
 - **Hybrid elite selection** balancing exploitation (raw fitness) and exploration (niched fitness via Tanimoto similarity)
 - **Adaptive mutation rate** that increases during stagnation to escape local optima
 - **Stagnation detection with restart** replacing a portion of the population with fresh n-gram-generated molecules
-- **Soft melting point penalty** providing a continuous fitness gradient rather than a hard threshold cutoff
 - **Biodegradability and toxicity filtering** via PaccMann MCA Tox21 predictor ([GT4SD](https://github.com/PaccMann/chemical_representation_learning_for_toxicity_prediction)) and RB-QSAR biodegradability classifier
 
 Property predictions are made by XGBoost models trained on curated experimental datasets with RDKit Morgan fingerprint descriptors and RFE feature selection.
@@ -65,6 +64,8 @@ wsga_clean/
 │   ├── train_classification.py # Biodegradability classifier
 │   └── data/                   # Curated training datasets
 │
+├── testing/                    # Experimental model comparisons (gitignored)
+│
 ├── data/                       # Cleaned experimental datasets
 │   ├── processed_full_hydrocarbon_dataset.csv
 │   ├── flashpoint_cleaned.csv
@@ -96,7 +97,7 @@ Molecules must satisfy safety, practicality, and synthesisability thresholds:
 
 | Constraint | Default | Description |
 |------------|---------|-------------|
-| Melting point | < -10 degC (hard), soft penalty from -30 degC | Liquid at low temperatures |
+| Melting point | < -30 degC | Liquid at low temperatures |
 | Boiling point | > 70 degC | Sufficient operating range |
 | Flash point | > 373 K | Fire safety |
 | Dielectric constant | < 8 | Electrical insulation |
@@ -247,3 +248,5 @@ bash train_all_classification.sh  # biodegradability classifier
 ```
 
 The Tox21 toxicity model is a pretrained PaccMann MCA neural network from the [GT4SD model hub](https://github.com/PaccMann/chemical_representation_learning_for_toxicity_prediction) and does not need retraining.
+
+Experimental model comparisons (FOM1 architecture comparison, surrogate comparison, beta prediction experiments, parity plots) live in the gitignored `testing/` directory.

@@ -1,5 +1,0 @@
-NR-AR
-NR-AhR
-NR-Aromatase
-NR-ER-LBD
-SR-ATAD5

@@ -2,9 +2,8 @@
 WSGA - Weighted Sum Genetic Algorithm for Cooling Fluid Discovery
 
 Uses combined n-gram model trained on all available datasets for diverse
-initial population generation. Features soft MP penalty, hybrid elite
-selection, stagnation detection with adaptive restart, and size-dependent
-mutation weighting.
+initial population generation. Features hybrid elite selection, stagnation
+detection with adaptive restart, and size-dependent mutation weighting.
 
 Optimizes molecular structures for thermophysical properties relevant to
 cooling fluids (thermal conductivity, heat capacity, viscosity, etc.)
@@ -13,7 +12,7 @@ cooling fluids (thermal conductivity, heat capacity, viscosity, etc.)
 import os
 import sys
 import pandas as pd
-import pickle
+
 import random
 from rdkit import Chem, RDLogger
 from rdkit.Chem import Draw, rdchem
@@ -30,7 +29,6 @@ from wsga_helper import (
     apply_niching,
     assign_validity,
     compute_fitness,
-    apply_mp_penalty,
     apply_molprice_penalty,
     load_regression_models_with_aux,
     load_fom1_direct_models
@@ -81,15 +79,14 @@ parser.add_argument("--target", type=str, default="FOM1",
     help="Target property to optimize"
 )
 parser.add_argument("--fom1_model_dir", type=str,
-    default="../training/FOM1_architecture_comparison/results",
+    default="../testing/FOM1_architecture_comparison/results",
     help="Directory containing FOM1 direct prediction models (fom1_40/ and fom1_100/ subdirs)"
 )
 parser.add_argument("--top_n", type=int, default=40, help="Number of top molecules to track and visualize")
 parser.add_argument("--num_generations", type=int, default=200, help="Number of generations to run")
 
 # Validity threshold arguments (for case studies)
-parser.add_argument("--mp_soft", type=float, default=-30, help="Soft MP threshold - no penalty below this (°C)")
-parser.add_argument("--mp_hard", type=float, default=-10, help="Hard MP threshold - zero fitness at/above this (°C)")
+parser.add_argument("--mp_threshold", type=float, default=-30, help="Max melting point (°C) - hard cutoff")
 parser.add_argument("--bp_threshold", type=float, default=70, help="Min boiling point (°C)")
 parser.add_argument("--dc_threshold", type=float, default=8, help="Max dielectric constant")
 parser.add_argument("--fp_threshold", type=float, default=373, help="Min flash point (K)")
@@ -164,9 +161,7 @@ TARGET_CONFIG = {
 }
 
 # Selection Criteria (validity thresholds) - from args for case studies
-# MP now uses soft penalty instead of hard threshold
-MP_SOFT = args.mp_soft            # Soft threshold - no penalty below this (°C)
-MP_HARD = args.mp_hard            # Hard threshold - zero fitness at/above this (°C)
+MP_THRESHOLD = args.mp_threshold      # Max melting point (°C) - hard cutoff
 BP_THRESHOLD = args.bp_threshold      # Min boiling point (°C)
 DC_THRESHOLD = args.dc_threshold      # Max dielectric constant
 MIN_FLASHPOINT = args.fp_threshold    # Min flash point (K)
@@ -186,7 +181,6 @@ MAX_OXYGENS = 6
 
 # Paths
 DATA_DIR = args.data_dir
-DATA_PATH = "../data/processed_full_hydrocarbon_dataset.csv"  # Kept for backwards compatibility
 MODEL_DIR = args.model_dir
 OUTPUT_IMAGE_PATH = os.path.join(args.output_dir, "ga_top_molecules.png")
 ALL_EVALUATED_PATH = os.path.join(args.output_dir, "all_evaluated_molecules.csv")
@@ -194,10 +188,10 @@ TOP_N_TRACKING_PATH = os.path.join(args.output_dir, "top_n_tracking.csv")
 GENERATION_STATS_PATH = os.path.join(args.output_dir, "generation_stats.csv")
 
 # Display
-VISUALIZE = True
+VISUALIZE = False
 TAU = args.Tau
 
-print(f"=== WSGA Configuration (Combined Dataset + Soft MP Penalty) ===")
+print(f"=== WSGA Configuration ===")
 print(f"Target: {TARGET}")
 print(f"Population size: {GENERATION_SIZE}")
 print(f"Elite count: {ELITE_COUNT}")
@@ -209,9 +203,6 @@ print(f"Tournament k: {TOURNAMENT_K}")
 print(f"Tau (niching): {TAU}")
 print(f"Top N tracking: {TOP_N}")
 print(f"Model directory: {MODEL_DIR}")
-print(f"--- MP Soft Penalty ---")
-print(f"Soft threshold: {MP_SOFT}°C (P=1.0 below)")
-print(f"Hard threshold: {MP_HARD}°C (P=0.0 at/above)")
 print(f"--- Stagnation Settings ---")
 print(f"Stagnation window: {STAGNATION_WINDOW} generations")
 print(f"Stagnation threshold: {STAGNATION_THRESHOLD}")
@@ -221,7 +212,8 @@ print(f"--- Adaptive Mutation ---")
 print(f"Min mutation rate: {MIN_MUTATION_RATE}")
 print(f"Max mutation rate: {MAX_MUTATION_RATE}")
 print(f"Boost factor: {MUTATION_BOOST_FACTOR}")
-print(f"--- Other Validity Thresholds (Hard) ---")
+print(f"--- Validity Thresholds ---")
+print(f"MP threshold: {MP_THRESHOLD}°C")
 print(f"BP threshold: {BP_THRESHOLD}°C")
 print(f"DC threshold: {DC_THRESHOLD}")
 print(f"Flash point: {MIN_FLASHPOINT}K")
@@ -312,7 +304,6 @@ AromaticMolecule = Chem.MolFromSmiles('c1ccccc1')
 TRACKED_PROPERTIES = [
     # Fitness
     'FitnessScore', 'NichedFitnessScore', 'AvgTanimotoSimilarity', 'is_valid',
-    'MP_Penalty',  # NEW: MP soft penalty factor
     # Thermophysical - 40C
     'Density_40C_g_cm^3', 'Kinematic_Viscosity_40C', 'Thermal_Conductivity_40C',
     'Heat_Capacity_Constant_Pressure_40C_J_K_Mol',
@@ -433,7 +424,7 @@ def compute_generation_stats(top_n_df, generation):
         'FitnessScore', 'NichedFitnessScore', 'AvgTanimotoSimilarity',
         'alpha_avg', 'beta_avg', 'FOM1_avg', 'FOM1_direct_avg', 'Ra_avg',
         'Thermal_Conductivity_40C', 'Kinematic_Viscosity_40C',
-        'SCScore', 'Tox21_Score', 'MP_Penalty', 'MP-Measured'
+        'SCScore', 'Tox21_Score', 'MP-Measured'
     ]
     
     for prop in stat_properties:
@@ -449,11 +440,6 @@ def compute_generation_stats(top_n_df, generation):
     if 'is_valid' in top_n_df.columns:
         stats['n_valid'] = top_n_df['is_valid'].sum()
         stats['pct_valid'] = 100 * top_n_df['is_valid'].mean()
-    
-    # Count molecules with full MP penalty (P=1)
-    if 'MP_Penalty' in top_n_df.columns:
-        stats['n_full_mp_pass'] = (top_n_df['MP_Penalty'] == 1.0).sum()
-        stats['n_mp_penalized'] = ((top_n_df['MP_Penalty'] > 0) & (top_n_df['MP_Penalty'] < 1)).sum()
     
     return stats
 
@@ -580,7 +566,7 @@ def main():
     evaluated_df = assign_validity(
         evaluated_df,
         sc_threshold=MAX_SCSCORE,
-        # mp_max removed - now using soft penalty
+        mp_max=MP_THRESHOLD,
         bp_min=BP_THRESHOLD,
         dc_max=DC_THRESHOLD,
         min_fp=MIN_FLASHPOINT,
@@ -589,7 +575,6 @@ def main():
     )
 
     evaluated_df = compute_fitness(evaluated_df, TARGET, TARGET_CONFIG)
-    evaluated_df = apply_mp_penalty(evaluated_df, soft_threshold=MP_SOFT, hard_threshold=MP_HARD)
     evaluated_df = apply_molprice_penalty(evaluated_df, soft_threshold=MOLPRICE_SOFT, hard_threshold=MOLPRICE_HARD)
     evaluated_df = apply_niching(evaluated_df)
 
@@ -731,7 +716,7 @@ def main():
         evaluated_offspring_df = assign_validity(
             evaluated_offspring_df,
             sc_threshold=MAX_SCSCORE,
-            # mp_max removed - now using soft penalty
+            mp_max=MP_THRESHOLD,
             bp_min=BP_THRESHOLD,
             dc_max=DC_THRESHOLD,
             min_fp=MIN_FLASHPOINT,
@@ -740,7 +725,6 @@ def main():
         )
 
         evaluated_offspring_df = compute_fitness(evaluated_offspring_df, TARGET, TARGET_CONFIG)
-        evaluated_offspring_df = apply_mp_penalty(evaluated_offspring_df, soft_threshold=MP_SOFT, hard_threshold=MP_HARD)
         evaluated_offspring_df = apply_molprice_penalty(evaluated_offspring_df, soft_threshold=MOLPRICE_SOFT, hard_threshold=MOLPRICE_HARD)
         # Note: Don't apply niching here - we'll do it on the combined population
 
@@ -882,7 +866,7 @@ def main():
                         fresh_evaluated = assign_validity(
                             fresh_evaluated,
                             sc_threshold=MAX_SCSCORE,
-                            # mp_max removed - now using soft penalty
+                            mp_max=MP_THRESHOLD,
                             bp_min=BP_THRESHOLD,
                             dc_max=DC_THRESHOLD,
                             min_fp=MIN_FLASHPOINT,
@@ -890,7 +874,6 @@ def main():
                             max_tox21=MAX_TOX21
                         )
                         fresh_evaluated = compute_fitness(fresh_evaluated, TARGET, TARGET_CONFIG)
-                        fresh_evaluated = apply_mp_penalty(fresh_evaluated, soft_threshold=MP_SOFT, hard_threshold=MP_HARD)
                         fresh_evaluated = apply_molprice_penalty(fresh_evaluated, soft_threshold=MOLPRICE_SOFT, hard_threshold=MOLPRICE_HARD)
                         
                         # Add to seen smiles
