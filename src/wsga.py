@@ -79,8 +79,8 @@ parser.add_argument("--target", type=str, default="FOM1",
     help="Target property to optimize"
 )
 parser.add_argument("--fom1_model_dir", type=str,
-    default="../testing/FOM1_architecture_comparison/results",
-    help="Directory containing FOM1 direct prediction models (fom1_40/ and fom1_100/ subdirs)"
+    default="../models",
+    help="Directory containing FOM1 direct prediction models (FOM1_direct_5fold_40C/ and FOM1_direct_5fold_100C/)"
 )
 parser.add_argument("--top_n", type=int, default=40, help="Number of top molecules to track and visualize")
 parser.add_argument("--num_generations", type=int, default=200, help="Number of generations to run")

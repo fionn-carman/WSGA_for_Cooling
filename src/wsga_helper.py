@@ -819,12 +819,19 @@ def load_fom1_direct_models(fom1_model_dir):
     Load XGBoost+Descriptor FOM1 direct prediction models (ensemble of 5 folds)
     for both 40C and 100C.
 
-    Each fold's joblib contains: {'model': XGBRegressor, 'scaler': StandardScaler, 'params': dict}
-    The models were trained on a specific set of RDKit descriptors listed in descriptor_columns.json.
+    Each fold's joblib contains:
+        {'model': XGBRegressor, 'scaler': StandardScaler,
+         'params': dict, 'descriptor_columns': list[str]}
+
+    Supports two directory layouts:
+        1. Flat: fom1_model_dir contains fom1_40/ and fom1_100/ subdirectories
+        2. Split: separate directories specified via a dict mapping
+           (used when 40C and 100C models live in models/FOM1_direct_5fold_40C etc.)
 
     Args:
-        fom1_model_dir: Path to the FOM1 architecture comparison results directory,
-                        e.g. testing/FOM1_architecture_comparison/results
+        fom1_model_dir: Either a single path containing fom1_40/ and fom1_100/ subdirs,
+                        or the base models/ directory containing FOM1_direct_5fold_40C
+                        and FOM1_direct_5fold_100C.
 
     Returns:
         dict with keys 'fom1_40' and 'fom1_100', each containing:
@@ -836,15 +843,35 @@ def load_fom1_direct_models(fom1_model_dir):
 
     fom1_models = {}
 
-    for temp_key in ['fom1_40', 'fom1_100']:
-        temp_dir = os.path.join(fom1_model_dir, temp_key)
+    # Resolve directory for each temperature
+    dir_candidates = {
+        'fom1_40': [
+            os.path.join(fom1_model_dir, 'fom1_40'),
+            os.path.join(fom1_model_dir, 'FOM1_direct_5fold_40C'),
+        ],
+        'fom1_100': [
+            os.path.join(fom1_model_dir, 'fom1_100'),
+            os.path.join(fom1_model_dir, 'FOM1_direct_5fold_100C'),
+        ],
+    }
 
-        # Load descriptor columns
+    for temp_key, candidates in dir_candidates.items():
+        temp_dir = None
+        for cand in candidates:
+            if os.path.isdir(cand):
+                temp_dir = cand
+                break
+        if temp_dir is None:
+            raise FileNotFoundError(
+                f"FOM1 {temp_key} model directory not found. Tried: {candidates}"
+            )
+
+        # Load descriptor columns from JSON if available
+        descriptor_columns = None
         desc_cols_path = os.path.join(temp_dir, 'descriptor_columns.json')
-        if not os.path.exists(desc_cols_path):
-            raise FileNotFoundError(f"FOM1 descriptor columns not found: {desc_cols_path}")
-        with open(desc_cols_path) as f:
-            descriptor_columns = json.load(f)
+        if os.path.exists(desc_cols_path):
+            with open(desc_cols_path) as f:
+                descriptor_columns = json.load(f)
 
         # Load all 5 fold models
         models = []
@@ -857,22 +884,27 @@ def load_fom1_direct_models(fom1_model_dir):
             models.append(model_data['model'])
             scalers.append(model_data['scaler'])
 
-            # Prefer descriptor_columns from joblib (saved alongside model during training)
-            # over descriptor_columns.json which may have been regenerated with a different RDKit
+            # Use descriptor_columns from joblib if not loaded from JSON
             if fold_id == 0 and 'descriptor_columns' in model_data:
-                if model_data['descriptor_columns'] != descriptor_columns:
+                if descriptor_columns is None:
+                    descriptor_columns = model_data['descriptor_columns']
+                elif model_data['descriptor_columns'] != descriptor_columns:
                     print(f"  NOTE: Using descriptor_columns from model joblib "
                           f"({len(model_data['descriptor_columns'])} cols) instead of JSON "
                           f"({len(descriptor_columns)} cols)")
-                descriptor_columns = model_data['descriptor_columns']
+                    descriptor_columns = model_data['descriptor_columns']
+
+        if descriptor_columns is None:
+            raise FileNotFoundError(
+                f"FOM1 {temp_key}: no descriptor_columns found in JSON or joblib"
+            )
 
         # Final check: ensure descriptor count matches scaler expectation
         expected_n = scalers[0].n_features_in_
         if expected_n != len(descriptor_columns):
             raise ValueError(
                 f"FOM1 {temp_key}: descriptor_columns has {len(descriptor_columns)} entries "
-                f"but scaler expects {expected_n} features. The models need to be retrained "
-                f"with train_xgboost_descriptors.py to embed the correct feature names."
+                f"but scaler expects {expected_n} features."
             )
 
         fom1_models[temp_key] = {
