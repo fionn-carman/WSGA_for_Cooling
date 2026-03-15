@@ -1,0 +1,11 @@
+Kappa1
+SMR_VSA1
+SlogP_VSA2
+TPSA
+EState_VSA9
+VSA_EState3
+MolLogP
+fr_Al_OH_noTert
+fr_aldehyde
+fr_ketone
+fr_lactone

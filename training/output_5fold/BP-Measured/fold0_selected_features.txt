@@ -1,0 +1,17 @@
+HeavyAtomMolWt
+MinPartialCharge
+BertzCT
+Chi1
+HallKierAlpha
+Ipc
+PEOE_VSA1
+PEOE_VSA10
+SMR_VSA1
+SMR_VSA7
+TPSA
+VSA_EState3
+VSA_EState8
+fr_Al_OH_noTert
+fr_COO
+fr_furan
+fr_lactone

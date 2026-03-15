@@ -1,0 +1,11 @@
+qed
+NumValenceElectrons
+MinPartialCharge
+Chi0n
+Chi1n
+Kappa1
+LabuteASA
+PEOE_VSA5
+NumRotatableBonds
+MolLogP
+MolMR

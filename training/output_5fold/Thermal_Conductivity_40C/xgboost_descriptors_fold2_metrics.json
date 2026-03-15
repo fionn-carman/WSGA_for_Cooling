@@ -1,0 +1,17 @@
+{
+  "fold": 2,
+  "r2": 0.8914875647702384,
+  "rmse": 0.009920565126947192,
+  "mae": 0.006130843665017638,
+  "n_features": 41,
+  "training_time_s": 2104.4221913814545,
+  "best_inner_cv_r2": 0.8633114409521593,
+  "best_params": {
+    "subsample": 0.7,
+    "n_estimators": 300,
+    "min_child_weight": 2,
+    "max_depth": 3,
+    "learning_rate": 0.05,
+    "colsample_bytree": 0.9
+  }
+}

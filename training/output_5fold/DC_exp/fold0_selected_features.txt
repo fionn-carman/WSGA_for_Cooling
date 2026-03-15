@@ -1,0 +1,7 @@
+SMR_VSA1
+SlogP_VSA3
+EState_VSA1
+VSA_EState3
+MolLogP
+fr_ketone
+fr_lactone

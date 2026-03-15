@@ -1,0 +1,98 @@
+{
+  "target": "Heat_Capacity_Constant_Pressure_100C_J_K_Mol",
+  "log_target": false,
+  "n_samples": 854,
+  "n_total_features": 129,
+  "mean_r2": 0.9915565283554513,
+  "std_r2": 0.0035951676434108205,
+  "mean_rmse": 15.383506287437635,
+  "mean_mae": 6.626034374991592,
+  "mean_n_features": 19.4,
+  "fold_metrics": [
+    {
+      "fold": 0,
+      "r2": 0.9953807832571481,
+      "rmse": 11.808167949665123,
+      "mae": 5.550511303282612,
+      "n_features": 29,
+      "training_time_s": 5146.306425571442,
+      "best_inner_cv_r2": 0.8511164411221547,
+      "best_params": {
+        "subsample": 0.7,
+        "n_estimators": 1000,
+        "min_child_weight": 5,
+        "max_depth": 6,
+        "learning_rate": 0.1,
+        "colsample_bytree": 0.9
+      }
+    },
+    {
+      "fold": 1,
+      "r2": 0.9855910041151922,
+      "rmse": 19.67289553481497,
+      "mae": 8.015329282883293,
+      "n_features": 5,
+      "training_time_s": 4031.8733246326447,
+      "best_inner_cv_r2": 0.853772257443216,
+      "best_params": {
+        "subsample": 0.7,
+        "n_estimators": 2000,
+        "min_child_weight": 1,
+        "max_depth": 3,
+        "learning_rate": 0.05,
+        "colsample_bytree": 0.7
+      }
+    },
+    {
+      "fold": 2,
+      "r2": 0.9908227299546063,
+      "rmse": 16.889034277059146,
+      "mae": 6.668021896986933,
+      "n_features": 11,
+      "training_time_s": 4214.794357061386,
+      "best_inner_cv_r2": 0.827595520013085,
+      "best_params": {
+        "subsample": 0.7,
+        "n_estimators": 2000,
+        "min_child_weight": 5,
+        "max_depth": 10,
+        "learning_rate": 0.1,
+        "colsample_bytree": 0.8
+      }
+    },
+    {
+      "fold": 3,
+      "r2": 0.9952011281010064,
+      "rmse": 13.044084131223608,
+      "mae": 6.352256908751376,
+      "n_features": 5,
+      "training_time_s": 4100.156842947006,
+      "best_inner_cv_r2": 0.8598006806641729,
+      "best_params": {
+        "subsample": 0.7,
+        "n_estimators": 300,
+        "min_child_weight": 1,
+        "max_depth": 100,
+        "learning_rate": 0.05,
+        "colsample_bytree": 0.7
+      }
+    },
+    {
+      "fold": 4,
+      "r2": 0.9907869963493028,
+      "rmse": 15.503349544425326,
+      "mae": 6.54405248305375,
+      "n_features": 47,
+      "training_time_s": 5571.488394498825,
+      "best_inner_cv_r2": 0.8579136438127062,
+      "best_params": {
+        "subsample": 0.7,
+        "n_estimators": 1000,
+        "min_child_weight": 5,
+        "max_depth": 3,
+        "learning_rate": 0.2,
+        "colsample_bytree": 1.0
+      }
+    }
+  ]
+}
