@@ -48,6 +48,15 @@ models/tox21_gt4sd/
 # Testing / experimental work (not part of the core pipeline)
 testing/
 
+# Literature discovery pipeline (vault notes live in WSGA_Notes, not here)
+literature/
+
+# Workflow artifacts (local, versioned by date)
+plans/
+results/
+plan.json
+results.json
+
 # Claude Code
 CLAUDE.md
 .claude/
