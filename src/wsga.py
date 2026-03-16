@@ -31,7 +31,8 @@ from wsga_helper import (
     compute_fitness,
     apply_molprice_penalty,
     load_regression_models_with_aux,
-    load_fom1_direct_models
+    load_fom1_direct_models,
+    is_stable_fragment,
 )
 from evaluation import get_scscore_cached, strict_canonicalize_smiles
 from fragment_utils import prepare_fragments, crossover_fragments, crossover_mol_fragments
@@ -104,6 +105,9 @@ parser.add_argument("--use_string_crossover", action="store_true",
     help="Use old string-level crossover instead of bond-level crossover")
 parser.add_argument("--best_elite_ratio", type=float, default=0.3,
     help="Fraction of elites selected by raw FitnessScore (rest by NichedFitnessScore)")
+parser.add_argument("--stability_mode", type=str, default=None,
+    choices=["strict"],
+    help="'strict': bans alkenes, glymes, limits ethers/esters/oxygens")
 
 args = parser.parse_args()
 
@@ -172,6 +176,7 @@ USE_STRING_CROSSOVER = args.use_string_crossover
 MOLPRICE_MODEL_PATH = args.molprice_model
 MOLPRICE_SOFT = args.molprice_soft
 MOLPRICE_HARD = args.molprice_hard
+STABILITY_MODE = args.stability_mode
 
 # Structural Constraints
 MAX_HEAVY_ATOMS = 30
@@ -226,6 +231,8 @@ print(f"MolPrice model: {MOLPRICE_MODEL_PATH}")
 if MOLPRICE_MODEL_PATH:
     print(f"MolPrice soft threshold: {MOLPRICE_SOFT} log(USD/mmol)")
     print(f"MolPrice hard threshold: {MOLPRICE_HARD} log(USD/mmol)")
+print(f"--- Stability Mode ---")
+print(f"Stability mode: {STABILITY_MODE}")
 print(f"FOM1 model dir: {args.fom1_model_dir}")
 print(f"==============================================")
 
@@ -294,6 +301,31 @@ Napthalenes = [Chem.MolFromSmiles(smi) for smi in [
 ]]
 
 AromaticMolecule = Chem.MolFromSmiles('c1ccccc1')
+
+# =============================
+# Stability Mode Filtering
+# =============================
+if STABILITY_MODE == "strict":
+    # Remove mutations that create unstable bonds
+    for rm_mut in ['Glycolate', 'ReplaceBond']:
+        if rm_mut in MUTATIONS:
+            MUTATIONS.remove(rm_mut)
+
+    # Only single bonds (prevent C=C creation)
+    BondTypes = [rdchem.BondType.SINGLE]
+
+    # Filter fragment library
+    fragments = [f for f in fragments if is_stable_fragment(f)]
+
+    # Tighten oxygen constraint
+    MAX_OXYGENS = 4
+
+    print(f"\n=== Stability Mode: STRICT ===")
+    print(f"  Mutations: {MUTATIONS}")
+    print(f"  BondTypes: {BondTypes}")
+    print(f"  Fragments: {len(fragments)} (after stability filter)")
+    print(f"  MAX_OXYGENS: {MAX_OXYGENS}")
+    print(f"==============================\n")
 
 
 # =============================
@@ -571,7 +603,8 @@ def main():
         dc_max=DC_THRESHOLD,
         min_fp=MIN_FLASHPOINT,
         use_biodeg=USE_BIODEG_FILTER,
-        max_tox21=MAX_TOX21
+        max_tox21=MAX_TOX21,
+        stability_mode=STABILITY_MODE
     )
 
     evaluated_df = compute_fitness(evaluated_df, TARGET, TARGET_CONFIG)
@@ -721,7 +754,8 @@ def main():
             dc_max=DC_THRESHOLD,
             min_fp=MIN_FLASHPOINT,
             use_biodeg=USE_BIODEG_FILTER,
-            max_tox21=MAX_TOX21
+            max_tox21=MAX_TOX21,
+            stability_mode=STABILITY_MODE
         )
 
         evaluated_offspring_df = compute_fitness(evaluated_offspring_df, TARGET, TARGET_CONFIG)
@@ -871,7 +905,8 @@ def main():
                             dc_max=DC_THRESHOLD,
                             min_fp=MIN_FLASHPOINT,
                             use_biodeg=USE_BIODEG_FILTER,
-                            max_tox21=MAX_TOX21
+                            max_tox21=MAX_TOX21,
+                            stability_mode=STABILITY_MODE
                         )
                         fresh_evaluated = compute_fitness(fresh_evaluated, TARGET, TARGET_CONFIG)
                         fresh_evaluated = apply_molprice_penalty(fresh_evaluated, soft_threshold=MOLPRICE_SOFT, hard_threshold=MOLPRICE_HARD)

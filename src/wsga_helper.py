@@ -564,16 +564,84 @@ INVALID_SMARTS = {
     "carbene": Chem.MolFromSmarts("[C;X2;v2]"),
     
     # ----- Strained small rings -----
-    "3_membered_ring": Chem.MolFromSmarts("[R3]"),  
-    "4_membered_ring": Chem.MolFromSmarts("[R4]"),  
+    "3_membered_ring": Chem.MolFromSmarts("[R3]"),
+    "4_membered_ring": Chem.MolFromSmarts("[R4]"),
 }
 
 
-def has_invalid_fragments(smiles):
+# ============================================================
+# Stability SMARTS (additional bans for --stability_mode strict)
+# ============================================================
+
+STABILITY_SMARTS = {
+    "any_alkene": Chem.MolFromSmarts("[C]=[C]"),           # aliphatic C=C only (not aromatic/C=O)
+    "polyether_2": Chem.MolFromSmarts("[C]-[O]-[C]-[C]-[O]-[C]"),  # glycol ether pattern
+    "conjugated_diene": Chem.MolFromSmarts("C=CC=C"),
+    "aldehyde": Chem.MolFromSmarts("[CH]=O"),
+    "carboxylic_acid": Chem.MolFromSmarts("[C](=O)[OH]"),
+    "carbonate": Chem.MolFromSmarts("[O]C(=O)[O]"),
+}
+
+
+def count_ether_linkages(mol):
+    """Count ether-type C-O-C linkages (excluding esters, acids, anhydrides).
+
+    Counts oxygen atoms bonded to exactly two carbon atoms where neither
+    carbon neighbor has a C=O bond (which would make it an ester oxygen).
+    """
+    count = 0
+    for atom in mol.GetAtoms():
+        if atom.GetAtomicNum() != 8 or atom.GetDegree() != 2:
+            continue
+        neighbors = atom.GetNeighbors()
+        if not all(n.GetAtomicNum() == 6 for n in neighbors):
+            continue
+        is_ester_o = False
+        for n in neighbors:
+            for bond in n.GetBonds():
+                other = bond.GetOtherAtom(n)
+                if other.GetIdx() == atom.GetIdx():
+                    continue
+                if other.GetAtomicNum() == 8 and bond.GetBondTypeAsDouble() == 2.0:
+                    is_ester_o = True
+                    break
+            if is_ester_o:
+                break
+        if not is_ester_o:
+            count += 1
+    return count
+
+
+def count_ester_groups(mol):
+    """Count ester groups (-C(=O)O-C)."""
+    pattern = Chem.MolFromSmarts("[CX3](=O)[OX2][#6]")
+    return len(mol.GetSubstructMatches(pattern))
+
+
+def is_stable_fragment(mol):
+    """Check if a fragment is compatible with stability mode (no alkenes,
+    carbonates, or multiple ether linkages)."""
+    if mol is None:
+        return False
+    alkene = Chem.MolFromSmarts("[C]=[C]")
+    if mol.HasSubstructMatch(alkene):
+        return False
+    carbonate = Chem.MolFromSmarts("[O]C(=O)[O]")
+    if mol.HasSubstructMatch(carbonate):
+        return False
+    if count_ether_linkages(mol) > 1:
+        return False
+    return True
+
+
+def has_invalid_fragments(smiles, stability_mode=None):
     """
     Returns True if molecule contains forbidden substructures
     that would make it unsuitable as a thermal/cooling fluid.
     Invalid SMILES are treated as invalid.
+
+    When stability_mode='strict', additionally bans alkenes, polyethers,
+    aldehydes, carboxylic acids, and carbonates via STABILITY_SMARTS.
     """
     if not isinstance(smiles, str):
         return True
@@ -588,6 +656,11 @@ def has_invalid_fragments(smiles):
     for name, pattern in INVALID_SMARTS.items():
         if pattern is not None and mol.HasSubstructMatch(pattern):
             return True
+
+    if stability_mode == "strict":
+        for name, pattern in STABILITY_SMARTS.items():
+            if pattern is not None and mol.HasSubstructMatch(pattern):
+                return True
 
     if has_small_rings(smiles):
         return True
@@ -626,12 +699,19 @@ def assign_validity(
     min_fp=423,
     use_biodeg=True,
     max_tox21=3,
+    stability_mode=None,
 ):
     """
     Assign validity flag to molecules based on property thresholds
     and structural filters.
+
+    When stability_mode='strict', additionally enforces:
+      - n_ether <= 1 (single ether OK, polyethers banned)
+      - n_ester <= 2 (mono/diesters OK)
+      - n_oxygen <= 4
     """
-    invalid_fragment = df["SMILES"].apply(has_invalid_fragments)
+    invalid_fragment = df["SMILES"].apply(
+        lambda smi: has_invalid_fragments(smi, stability_mode=stability_mode))
     rdkit_invalid = df["SMILES"].apply(has_rdkit_valence_errors)
 
     # Check for radicals (unpaired electrons - not physically stable coolants)
@@ -658,6 +738,19 @@ def assign_validity(
         (~has_radical) &
         (~negative_beta)
     )
+
+    # Additional stability constraints
+    if stability_mode == "strict":
+        def _stability_check(smi):
+            mol = Chem.MolFromSmiles(smi) if smi else None
+            if mol is None:
+                return False
+            n_ether = count_ether_linkages(mol)
+            n_ester = count_ester_groups(mol)
+            n_oxygen = sum(1 for a in mol.GetAtoms() if a.GetAtomicNum() == 8)
+            return n_ether <= 1 and n_ester <= 2 and n_oxygen <= 4
+        stability_ok = df["SMILES"].apply(_stability_check)
+        conditions = conditions & stability_ok
 
     df["is_valid"] = conditions.astype(int)
     return df
