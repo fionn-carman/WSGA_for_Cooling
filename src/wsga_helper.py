@@ -1064,3 +1064,199 @@ def load_regression_models_with_aux(targets, model_dir):
             continue
     
     return models
+
+
+# ============================================================
+# NSGA-II Core Functions
+# ============================================================
+
+def fast_non_dominated_sort(objectives):
+    """
+    Standard NSGA-II non-dominated sort.
+
+    Args:
+        objectives: (N, M) array where each row is maximised.
+
+    Returns:
+        List of fronts, each front a list of row indices.
+        fronts[0] = Pareto-optimal set, fronts[1] = next front, etc.
+    """
+    n = len(objectives)
+    domination_count = np.zeros(n, dtype=int)   # how many dominate me
+    dominated_set = [[] for _ in range(n)]       # whom do I dominate
+    ranks = np.full(n, -1, dtype=int)
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            diff = objectives[i] - objectives[j]
+            if np.all(diff >= 0) and np.any(diff > 0):
+                # i dominates j
+                dominated_set[i].append(j)
+                domination_count[j] += 1
+            elif np.all(diff <= 0) and np.any(diff < 0):
+                # j dominates i
+                dominated_set[j].append(i)
+                domination_count[i] += 1
+
+    fronts = []
+    current_front = np.where(domination_count == 0)[0].tolist()
+
+    rank = 0
+    while current_front:
+        for idx in current_front:
+            ranks[idx] = rank
+        fronts.append(current_front)
+        next_front = []
+        for idx in current_front:
+            for dominated_idx in dominated_set[idx]:
+                domination_count[dominated_idx] -= 1
+                if domination_count[dominated_idx] == 0:
+                    next_front.append(dominated_idx)
+        current_front = next_front
+        rank += 1
+
+    return fronts
+
+
+def crowding_distance_3d(objectives_3d, front_indices):
+    """
+    Crowding distance in 3D: FOM1, -MolPrice, -AvgTanimoto.
+
+    Boundary points (best/worst in any dimension) get inf distance
+    to ensure they are always preserved.
+
+    Args:
+        objectives_3d: (N, 3) array of objective values for the full population.
+        front_indices: list of indices belonging to this front.
+
+    Returns:
+        dict mapping index -> crowding distance.
+    """
+    front_indices = list(front_indices)
+    n = len(front_indices)
+    if n <= 2:
+        return {idx: float('inf') for idx in front_indices}
+
+    distances = {idx: 0.0 for idx in front_indices}
+    obj_vals = objectives_3d[front_indices]  # (n, 3)
+
+    for m in range(3):
+        sorted_order = np.argsort(obj_vals[:, m])
+        sorted_indices = [front_indices[i] for i in sorted_order]
+
+        # Boundary points get infinite distance
+        distances[sorted_indices[0]] = float('inf')
+        distances[sorted_indices[-1]] = float('inf')
+
+        obj_range = obj_vals[sorted_order[-1], m] - obj_vals[sorted_order[0], m]
+        if obj_range == 0:
+            continue
+
+        for k in range(1, n - 1):
+            distances[sorted_indices[k]] += (
+                (obj_vals[sorted_order[k + 1], m] - obj_vals[sorted_order[k - 1], m])
+                / obj_range
+            )
+
+    return distances
+
+
+def nsga2_tournament(pareto_ranks, crowding_distances, k=2):
+    """
+    Binary tournament: prefer lower pareto_rank, then higher crowding_distance.
+
+    Args:
+        pareto_ranks: array of Pareto ranks for the population (length N).
+        crowding_distances: array of crowding distances (length N).
+        k: tournament size (default 2).
+
+    Returns:
+        Index of the tournament winner.
+    """
+    n = len(pareto_ranks)
+    competitors = random.sample(range(n), min(k, n))
+
+    best = competitors[0]
+    for c in competitors[1:]:
+        if pareto_ranks[c] < pareto_ranks[best]:
+            best = c
+        elif pareto_ranks[c] == pareto_ranks[best]:
+            if crowding_distances[c] > crowding_distances[best]:
+                best = c
+    return best
+
+
+def compute_hypervolume_2d(front_points, ref_point):
+    """
+    2D hypervolume by sorting + rectangle summation.
+
+    Both objectives are maximised. Points dominated by the reference
+    are excluded. The reference point should be *below* the front
+    (e.g. [0, -10] for FOM1 and -MolPrice).
+
+    Args:
+        front_points: (K, 2) array of non-dominated objective vectors.
+        ref_point: (2,) reference point (lower bound).
+
+    Returns:
+        Hypervolume (float).
+    """
+    pts = np.asarray(front_points)
+    ref = np.asarray(ref_point)
+
+    # Filter points that are worse than reference in any objective
+    mask = np.all(pts > ref, axis=1)
+    pts = pts[mask]
+
+    if len(pts) == 0:
+        return 0.0
+
+    # Sort by first objective descending
+    order = np.argsort(-pts[:, 0])
+    pts = pts[order]
+
+    hv = 0.0
+    prev_y = ref[1]
+    for x, y in pts:
+        if y > prev_y:
+            hv += (x - ref[0]) * (y - prev_y)
+            prev_y = y
+
+    return hv
+
+
+def compute_nsga2_objectives(df, target, target_config):
+    """
+    Compute the two NSGA-II objectives (both maximised).
+
+    Obj 1: FOM1 (or chosen target), zeroed for invalid molecules.
+    Obj 2: Affordability = -MolPrice, set to -1e6 for invalid molecules.
+
+    Args:
+        df: evaluated DataFrame with 'is_valid', target column, and 'MolPrice'.
+        target: target key (e.g. 'FOM1_direct').
+        target_config: dict mapping target key to {column, maximize}.
+
+    Returns:
+        (N, 2) numpy array of objectives.
+    """
+    target_col = target_config[target]["column"]
+    maximize = target_config[target]["maximize"]
+
+    fom = df[target_col].values.copy().astype(float)
+    if not maximize:
+        fom = -fom
+
+    # Zero out invalid molecules on objective 1
+    invalid = df["is_valid"].values == 0
+    fom[invalid] = 0.0
+
+    # Objective 2: affordability = -MolPrice
+    if "MolPrice" in df.columns and not df["MolPrice"].isna().all():
+        afford = -df["MolPrice"].values.copy().astype(float)
+    else:
+        afford = np.zeros(len(df))
+
+    afford[invalid] = -1e6
+
+    return np.column_stack([fom, afford])
