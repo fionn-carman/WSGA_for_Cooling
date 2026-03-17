@@ -51,8 +51,9 @@ testing/
 # Literature discovery pipeline (vault notes live in WSGA_Notes, not here)
 literature/
 
-# NIST WTT data collection (standalone, not part of pipeline)
-NIST_WTT_Collection/
+# NIST WTT data collection (track curated data, ignore collection scripts)
+NIST_WTT_Collection/*
+!NIST_WTT_Collection/data/
 
 # Claude Code
 CLAUDE.md
