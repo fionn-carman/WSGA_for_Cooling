@@ -180,6 +180,16 @@ def main():
     fold_metrics = []
 
     for fold_id, (train_idx, test_idx) in enumerate(kf.split(X)):
+        # Resume: skip folds that already have metrics + model
+        metrics_path = out_dir / f"xgboost_descriptors_fold{fold_id}_metrics.json"
+        model_path = out_dir / f"xgboost_descriptors_fold{fold_id}_model.joblib"
+        if metrics_path.exists() and model_path.exists():
+            with open(metrics_path) as f:
+                prev = json.load(f)
+            fold_metrics.append(prev)
+            logger.info("FOLD %d/4 — already complete (R2=%.4f), skipping", fold_id, prev["r2"])
+            continue
+
         logger.info("=" * 50)
         logger.info("FOLD %d/4", fold_id)
         logger.info("=" * 50)
