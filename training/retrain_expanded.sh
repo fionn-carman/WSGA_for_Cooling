@@ -5,11 +5,15 @@
 #PBS -J 0-11
 
 # ============================================================
-# Retrain All Property Models with Expanded/Cleaned Data
+# Retrain All Property Models (5-Fold Ensemble) with Expanded Data
 # ============================================================
 #
-# Post-WTT expansion retraining:
-#   0-7:  Density, Viscosity, TC, Cp — WTT expansion + corrections
+# Uses train_5fold_rfe.py (5-fold ensemble with RFE + StandardScaler)
+# on expanded/cleaned training data:
+#   0-1:  Density 40/100C — WTT expansion + corrections
+#   2-3:  Kinematic Viscosity 40/100C — WTT expansion (log)
+#   4-5:  Thermal Conductivity 40/100C — WTT expansion
+#   6-7:  Heat Capacity 40/100C — WTT expansion (log)
 #   8:    Flash point — canonicalized SMILES + median dedup
 #   9:    DC — canonicalized SMILES + dedup
 #   10-11: FOM1 40/100 — WTT expansion, new descriptors computed
@@ -62,84 +66,57 @@ targets[9]="DC_exp"
 targets[10]="FOM1_exp_40"
 targets[11]="FOM1_exp_100"
 
-# Log transform flags (1 = use log, 0 = don't use log)
-log_flags[0]=0  # Density_40C
-log_flags[1]=0  # Density_100C
-log_flags[2]=1  # Viscosity_40C (log)
-log_flags[3]=1  # Viscosity_100C (log)
-log_flags[4]=0  # Thermal_Conductivity_40C
-log_flags[5]=0  # Thermal_Conductivity_100C
-log_flags[6]=1  # Heat_Capacity_40C (log)
-log_flags[7]=1  # Heat_Capacity_100C (log)
-log_flags[8]=0  # flashpoint
-log_flags[9]=0  # DC_exp
-log_flags[10]=0 # FOM1_exp_40
-log_flags[11]=0 # FOM1_exp_100
-
-# Auxiliary features (use another property as input feature)
-# Empty string means no auxiliary feature
-declare -a aux_features
-aux_features[0]=""                      # Density_40C - no auxiliary
-aux_features[1]="Density_40C_g_cm^3"    # Density_100C - use Density_40C
-aux_features[2]=""                      # Viscosity_40C - no auxiliary
-aux_features[3]=""                      # Viscosity_100C - no auxiliary
-aux_features[4]=""                      # Thermal_Conductivity_40C - no auxiliary
-aux_features[5]=""                      # Thermal_Conductivity_100C - no auxiliary
-aux_features[6]=""                      # Heat_Capacity_40C - no auxiliary
-aux_features[7]=""                      # Heat_Capacity_100C - no auxiliary
-aux_features[8]=""                      # flashpoint - no auxiliary
-aux_features[9]=""                      # DC_exp - no auxiliary
-aux_features[10]=""                     # FOM1_exp_40 - no auxiliary
-aux_features[11]=""                     # FOM1_exp_100 - no auxiliary
+# Log-transform flags
+log_flags[0]=""
+log_flags[1]=""
+log_flags[2]="--log_target"
+log_flags[3]="--log_target"
+log_flags[4]=""
+log_flags[5]=""
+log_flags[6]="--log_target"
+log_flags[7]="--log_target"
+log_flags[8]=""
+log_flags[9]=""
+log_flags[10]=""
+log_flags[11]=""
 
 # ==============================
-# Hybrid method settings
+# Training settings
 # ==============================
-N_ITER=10000        # RandomizedSearchCV iterations
-RFE_REPEATS=3       # RFE repeats for stability
-STEP_SIZE=2         # Feature removal step size
+N_RANDOM_ITER=1000     # RandomizedSearchCV iterations
+N_RFE_REPEATS=3        # RFE repeats per fold
+RFE_STEP_SIZE=2        # Features dropped per RFE step
+OUTDIR="./output_5fold_retrain"
 
 # =================================
 # Get current target configuration
 # =================================
 target_name=${targets[$N]}
-use_log=${log_flags[$N]}
-aux_feature=${aux_features[$N]}
+log_flag=${log_flags[$N]}
 
-# Build command arguments
-cmd_args="--data_dir ./data --target $target_name --outdir ./output --n_random_iter $N_ITER --n_rfe_repeats $RFE_REPEATS --rfe_step_size $STEP_SIZE"
+# Build command
+cmd_args="--target $target_name --data_dir ./data --outdir $OUTDIR --n_random_iter $N_RANDOM_ITER --n_rfe_repeats $N_RFE_REPEATS --rfe_step_size $RFE_STEP_SIZE $log_flag"
 
-if [ $use_log -eq 1 ]; then
-    cmd_args="$cmd_args --log_target"
-fi
-
-if [ -n "$aux_feature" ]; then
-    cmd_args="$cmd_args --auxiliary_feature $aux_feature"
-fi
-
-# Log file for this job
-mkdir -p "./output"
-log_file="./output/${target_name}_retrain_expanded.log"
+# Log file
+mkdir -p "${OUTDIR}/${target_name}"
+log_file="${OUTDIR}/${target_name}/training.log"
 
 echo "========================================" | tee "$log_file"
-echo "RETRAIN EXPANDED: ${target_name}" | tee -a "$log_file"
-echo "RandomizedSearchCV iterations: ${N_ITER}" | tee -a "$log_file"
-echo "RFE repeats: ${RFE_REPEATS}" | tee -a "$log_file"
-echo "Step size: ${STEP_SIZE}" | tee -a "$log_file"
-echo "Log transform: ${use_log}" | tee -a "$log_file"
-if [ -n "$aux_feature" ]; then
-    echo "Auxiliary feature: ${aux_feature}" | tee -a "$log_file"
-fi
+echo "5-Fold RFE Retrain (Expanded Data): ${target_name}" | tee -a "$log_file"
+echo "Log transform: ${log_flag:-none}" | tee -a "$log_file"
+echo "RandomizedSearchCV: ${N_RANDOM_ITER} iter" | tee -a "$log_file"
+echo "RFE repeats: ${N_RFE_REPEATS}" | tee -a "$log_file"
+echo "Step size: ${RFE_STEP_SIZE}" | tee -a "$log_file"
 echo "Job started at: $(date)" | tee -a "$log_file"
 echo "Working directory: $(pwd)" | tee -a "$log_file"
 echo "Data directory: ./data" | tee -a "$log_file"
-echo "Output directory: ./output" | tee -a "$log_file"
+echo "Output directory: ${OUTDIR}" | tee -a "$log_file"
 echo "========================================" | tee -a "$log_file"
 
 # ===================
 # Run training script
 # ===================
-python3 train_regression.py $cmd_args 2>&1 | tee -a "$log_file"
+python3 train_5fold_rfe.py $cmd_args 2>&1 | tee -a "$log_file"
 
 # Capture exit status
 exit_status=$?
@@ -150,27 +127,12 @@ echo "Exit status: ${exit_status}" | tee -a "$log_file"
 echo "========================================" | tee -a "$log_file"
 
 # ===================
-# Summary of outputs
-# ===================
-echo "" | tee -a "$log_file"
-echo "Output locations:" | tee -a "$log_file"
-echo "  Model:    ./output/${target_name}/model/xgb_model.joblib" | tee -a "$log_file"
-echo "  Summary:  ./output/${target_name}/model/model_summary.txt" | tee -a "$log_file"
-echo "  Features: ./output/${target_name}/RFE/selected_features.txt" | tee -a "$log_file"
-echo "  Plots:    ./output/${target_name}/plots/" | tee -a "$log_file"
-echo "" | tee -a "$log_file"
-
-# ===================
 # Clean up PBS output files
 # ===================
 if [ "$JOB_ID" != "local" ]; then
-    # Extract the base job ID (without array index)
     BASE_JOB_ID=$(echo "$JOB_ID" | cut -d'[' -f1 | cut -d'.' -f1)
-
-    # Remove the .e and .o files for this array job
     rm -f "${DIRECTORY}/retrain_expanded.e${BASE_JOB_ID}.${N}" 2>/dev/null
     rm -f "${DIRECTORY}/retrain_expanded.o${BASE_JOB_ID}.${N}" 2>/dev/null
-
     echo "Cleaned up PBS output files" | tee -a "$log_file"
 fi
 
