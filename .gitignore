@@ -51,11 +51,8 @@ testing/
 # Literature discovery pipeline (vault notes live in WSGA_Notes, not here)
 literature/
 
-# Workflow artifacts (local, versioned by date)
-plans/
-results/
-plan.json
-results.json
+# NIST WTT data collection (standalone, not part of pipeline)
+NIST_WTT_Collection/
 
 # Claude Code
 CLAUDE.md
