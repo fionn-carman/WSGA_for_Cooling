@@ -33,6 +33,11 @@ import matplotlib.pyplot as plt
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
+# Add src to path for MolPrice model
+_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
+if _src not in sys.path:
+    sys.path.insert(0, _src)
+
 
 # Ordered threshold levels for consistent plotting
 LEVEL_ORDER = ["nocost", "gentle", "moderate", "firm", "tight", "aggressive"]
@@ -47,10 +52,10 @@ LEVEL_DESCRIPTIONS = {
 
 CATEGORY_ORDER = ["bio_stable", "bio_unstable", "nonbio_stable", "nonbio_unstable"]
 CATEGORY_LABELS = {
-    "bio_stable": "Bio + Stable",
-    "bio_unstable": "Bio + Unstable",
-    "nonbio_stable": "Non-bio + Stable",
-    "nonbio_unstable": "Non-bio + Unstable",
+    "bio_stable": "Biodegradable = True, Stable = True",
+    "bio_unstable": "Biodegradable = True, Stable = False",
+    "nonbio_stable": "Biodegradable = False, Stable = True",
+    "nonbio_unstable": "Biodegradable = False, Stable = False",
 }
 CATEGORY_COLORS = {
     "bio_stable": "#2A9D8F",
@@ -100,15 +105,59 @@ def safe_read_csv(path):
 
 
 _LOADED_CACHE = {}
+_MOLPRICE_MODEL = None
+
+
+def _get_molprice_model():
+    """Lazy-load the MolPrice model (singleton)."""
+    global _MOLPRICE_MODEL
+    if _MOLPRICE_MODEL is None:
+        from molprice import MolPriceModel
+        model_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "models", "MolPrice", "MP_Morgan_hybrid.pkl")
+        if os.path.exists(model_path):
+            _MOLPRICE_MODEL = MolPriceModel(model_path)
+            print(f"  Loaded MolPrice model for backfilling")
+        else:
+            print(f"  WARNING: MolPrice model not found at {model_path}")
+    return _MOLPRICE_MODEL
+
+
+def _backfill_molprice(df):
+    """Predict MolPrice for rows where it is missing."""
+    smiles_col = ("CanonicalSMILES" if "CanonicalSMILES" in df.columns
+                  else "SMILES")
+    if "MolPrice" not in df.columns:
+        df["MolPrice"] = np.nan
+
+    missing = df["MolPrice"].isna() | (df["MolPrice"].astype(str) == "")
+    if not missing.any():
+        return df
+
+    mp_model = _get_molprice_model()
+    if mp_model is None:
+        return df
+
+    smiles_to_predict = df.loc[missing, smiles_col].tolist()
+    predictions = mp_model.predict_batch(smiles_to_predict)
+    df.loc[missing, "MolPrice"] = predictions
+    return df
 
 
 def load_all_evaluated(run_path, mp_hard=-30):
-    """Load all_evaluated_molecules.csv and filter to valid, MP-passing molecules."""
+    """Load all_evaluated_molecules.csv (or top_n_tracking.csv fallback).
+
+    Falls back to top_n_tracking.csv when all_evaluated is unavailable.
+    Backfills missing MolPrice values using the MolPrice model.
+    """
     cache_key = (run_path, mp_hard)
     if cache_key in _LOADED_CACHE:
         return _LOADED_CACHE[cache_key]
 
     path = os.path.join(run_path, "all_evaluated_molecules.csv")
+    if not os.path.exists(path):
+        path = os.path.join(run_path, "top_n_tracking.csv")
     if not os.path.exists(path):
         _LOADED_CACHE[cache_key] = None
         return None
@@ -129,6 +178,9 @@ def load_all_evaluated(run_path, mp_hard=-30):
     if df.empty:
         _LOADED_CACHE[cache_key] = None
         return None
+
+    # Backfill missing MolPrice (e.g. nocost runs)
+    df = _backfill_molprice(df)
 
     df = df.sort_values("FOM1_avg", ascending=False)
     _LOADED_CACHE[cache_key] = df
@@ -170,6 +222,28 @@ def _pareto_fronts(x, y, n_fronts=1):
 # Figures
 # ======================================================================
 
+def _filter_baseline_for_category(baseline_df, category):
+    """Filter baseline molecules to those satisfying a category's constraints.
+
+    Each category implies a set of filters:
+      - bio_*:    biodegradable molecules only
+      - nonbio_*: no biodeg filter (all molecules)
+      - *_stable: stable molecules only
+      - *_unstable: no stability filter (all molecules)
+
+    So nonbio_unstable gets ALL baseline molecules, bio_stable gets only
+    those that are both biodegradable AND stable, etc.
+    """
+    mask = pd.Series(True, index=baseline_df.index)
+    if category.startswith("bio_"):
+        if "is_biodegradable" in baseline_df.columns:
+            mask &= baseline_df["is_biodegradable"]
+    if category.endswith("_stable"):
+        if "is_stable" in baseline_df.columns:
+            mask &= baseline_df["is_stable"]
+    return baseline_df[mask].copy()
+
+
 def plot_pareto_2x2(runs_df, sweep_dir, out_dir, baseline_df=None):
     """2x2 grid of Pareto front panels — one per category.
 
@@ -179,20 +253,24 @@ def plot_pareto_2x2(runs_df, sweep_dir, out_dir, baseline_df=None):
       - Blue diamonds: baseline experimental FOM1
       - Orange squares: baseline predicted FOM1
       - Dashed lines: baseline Pareto fronts
+
+    Baseline molecules are filtered to those satisfying the category's
+    constraints (not the exclusive category assignment), so e.g. the
+    "no filters" panel shows all 15 baseline molecules.
     """
     fig, axes = plt.subplots(2, 2, figsize=(14, 12), sharex=True, sharey=True)
 
+    # Layout: columns = biodegradable (left=False, right=True)
+    #         rows    = stable (top=False, bottom=True)
     panel_map = {
-        "bio_stable": (0, 0),
+        "nonbio_unstable": (0, 0),
         "bio_unstable": (0, 1),
         "nonbio_stable": (1, 0),
-        "nonbio_unstable": (1, 1),
+        "bio_stable": (1, 1),
     }
 
     for category, (row, col) in panel_map.items():
         ax = axes[row, col]
-        ax.set_title(CATEGORY_LABELS[category], fontsize=13, fontweight="bold")
-
         # --- Collect WSGA molecules for this category ---
         cat_runs = runs_df[runs_df["category"] == category]
         all_mols = []
@@ -236,8 +314,10 @@ def plot_pareto_2x2(runs_df, sweep_dir, out_dir, baseline_df=None):
                     zorder=5)
 
         # --- Baseline for this category ---
+        # Filter to molecules satisfying this category's constraints
+        # (inclusive, not exclusive category assignment)
         if baseline_df is not None:
-            bdf = baseline_df[baseline_df["category"] == category].copy()
+            bdf = _filter_baseline_for_category(baseline_df, category)
 
             if len(bdf) > 0 and "MolPrice" in bdf.columns:
                 bdf = bdf.dropna(subset=["MolPrice"])
@@ -249,7 +329,7 @@ def plot_pareto_2x2(runs_df, sweep_dir, out_dir, baseline_df=None):
                     ax.scatter(ab, fb_exp, c="#1F77B4", s=30, alpha=0.7,
                                edgecolors="black", linewidths=0.4,
                                marker="D", zorder=2,
-                               label="Baseline (exp.)")
+                               label=f"Baseline exp. ({len(bdf)})")
                     bfronts = _pareto_fronts(ab, fb_exp, n_fronts=1)
                     for bidx in bfronts:
                         if len(bidx) == 0:
@@ -268,7 +348,7 @@ def plot_pareto_2x2(runs_df, sweep_dir, out_dir, baseline_df=None):
                     ax.scatter(ab, fb_pred, c="#FF7F0E", s=30, alpha=0.7,
                                edgecolors="black", linewidths=0.4,
                                marker="s", zorder=3,
-                               label="Baseline (pred.)")
+                               label="Baseline pred.")
                     bfronts = _pareto_fronts(ab, fb_pred, n_fronts=1)
                     for bidx in bfronts:
                         if len(bidx) == 0:
@@ -281,21 +361,39 @@ def plot_pareto_2x2(runs_df, sweep_dir, out_dir, baseline_df=None):
                                 label="Pareto (baseline pred.)",
                                 zorder=7)
 
-        ax.legend(fontsize=7, loc="lower left")
+        ax.legend(fontsize=7, loc="upper left", frameon=False)
         ax.tick_params(labelsize=10)
 
-    # Shared labels
+    # Axis limits
+    for row_axes in axes:
+        for ax in row_axes:
+            ax.set_xlim(-6, -2)
+            ax.set_ylim(55, None)
+
+    # Column / row labels
+    axes[0, 0].annotate("Biodegradable = False", xy=(0.5, 1.15),
+                         xycoords="axes fraction", ha="center", fontsize=13,
+                         fontweight="bold")
+    axes[0, 1].annotate("Biodegradable = True", xy=(0.5, 1.15),
+                         xycoords="axes fraction", ha="center", fontsize=13,
+                         fontweight="bold")
+    axes[0, 0].annotate("Stable = False", xy=(-0.22, 0.5),
+                         xycoords="axes fraction", ha="center", va="center",
+                         fontsize=13, fontweight="bold", rotation=90)
+    axes[1, 0].annotate("Stable = True", xy=(-0.22, 0.5),
+                         xycoords="axes fraction", ha="center", va="center",
+                         fontsize=13, fontweight="bold", rotation=90)
+
+    # Shared axis labels
     for ax in axes[1, :]:
-        ax.set_xlabel("\u2212MolPrice (\u2212log $/mmol)  \u2192  cheaper",
+        ax.set_xlabel("\u2212MolPrice / \u2212log($ mmol\u207b\u00b9)  \u2192  cheaper",
                       fontsize=11)
     for ax in axes[:, 0]:
-        ax.set_ylabel("FOM1 (avg)", fontsize=11)
+        ax.set_ylabel("FOM1 / W m\u207b\u00b9 K\u207b\u00b9", fontsize=11)
 
-    fig.suptitle("Cost vs FOM1 Pareto Fronts — Stability \u00d7 MolPrice Sweep",
-                 fontsize=15, y=1.01)
-    fig.tight_layout()
+    fig.tight_layout(rect=[0.04, 0, 1, 0.96])
     path = os.path.join(out_dir, "pareto_2x2.png")
-    fig.savefig(path, dpi=300, bbox_inches="tight")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved: {os.path.abspath(path)}")
 
@@ -399,11 +497,12 @@ def plot_molprice_distribution(runs_df, sweep_dir, out_dir):
 def plot_convergence_2x2(runs_df, sweep_dir, out_dir):
     """Convergence curves in 2x2 grid (one per category)."""
     present_levels = [l for l in LEVEL_ORDER if l in runs_df["level"].unique()]
+    # Same layout as Pareto: cols=biodeg, rows=stable
     panel_map = {
-        "bio_stable": (0, 0),
+        "nonbio_unstable": (0, 0),
         "bio_unstable": (0, 1),
         "nonbio_stable": (1, 0),
-        "nonbio_unstable": (1, 1),
+        "bio_stable": (1, 1),
     }
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 10), sharex=True, sharey=True)
@@ -671,7 +770,7 @@ if __name__ == "__main__":
                         default="../outputs/stability_molprice_sweep")
     parser.add_argument("--top_molecules", type=int, default=50)
     parser.add_argument("--baseline_csv", type=str,
-                        default="../results/fom1_dataset_categories.csv",
+                        default="../BaselineFOM1Eval/output/fom1_dataset_categories.csv",
                         help="Pre-categorised FOM1 dataset CSV")
     args = parser.parse_args()
 

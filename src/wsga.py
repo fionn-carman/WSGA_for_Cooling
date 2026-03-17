@@ -227,10 +227,13 @@ print(f"Tox21 max: {MAX_TOX21}")
 print(f"Biodeg filter: {USE_BIODEG_FILTER}")
 print(f"Crossover: {'string-level' if USE_STRING_CROSSOVER else 'bond-level (with string fallback)'}")
 print(f"--- MolPrice ---")
-print(f"MolPrice model: {MOLPRICE_MODEL_PATH}")
+print(f"MolPrice prediction: always on (for logging)")
 if MOLPRICE_MODEL_PATH:
+    print(f"MolPrice penalty: enabled ({MOLPRICE_MODEL_PATH})")
     print(f"MolPrice soft threshold: {MOLPRICE_SOFT} log(USD/mmol)")
     print(f"MolPrice hard threshold: {MOLPRICE_HARD} log(USD/mmol)")
+else:
+    print(f"MolPrice penalty: disabled (no --molprice_model)")
 print(f"--- Stability Mode ---")
 print(f"Stability mode: {STABILITY_MODE}")
 print(f"FOM1 model dir: {args.fom1_model_dir}")
@@ -526,12 +529,17 @@ def main():
     biodeg_dir = os.path.join(MODEL_DIR, "biodegradability")
     biodeg_model = load_biodeg_model(biodeg_dir)
 
-    # MolPrice model (cost prediction)
+    # MolPrice model (cost prediction) — always loaded for logging,
+    # but the cost *penalty* is only applied when --molprice_model is set.
+    from molprice import MolPriceModel
+    _default_mp_path = os.path.join(MODEL_DIR, "MolPrice", "MP_Morgan_hybrid.pkl")
+    _mp_path = MOLPRICE_MODEL_PATH or _default_mp_path
     molprice_model = None
-    if MOLPRICE_MODEL_PATH:
-        from molprice import MolPriceModel
-        molprice_model = MolPriceModel(MOLPRICE_MODEL_PATH)
-        print(f"Loaded MolPrice model from {MOLPRICE_MODEL_PATH}")
+    if os.path.exists(_mp_path):
+        molprice_model = MolPriceModel(_mp_path)
+        print(f"Loaded MolPrice model from {_mp_path}")
+    else:
+        print(f"WARNING: MolPrice model not found at {_mp_path} — MolPrice column will be empty")
 
     # FOM1 direct prediction models (XGBoost+Descriptor ensemble)
     fom1_direct_models = None

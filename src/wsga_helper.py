@@ -482,7 +482,12 @@ def apply_molprice_penalty(df, soft_threshold=3.0, hard_threshold=6.0):
     Returns:
         DataFrame with updated FitnessScore and new MolPrice_Penalty column
     """
-    if "MolPrice" not in df.columns:
+    if "MolPrice" not in df.columns or df["MolPrice"].isna().all():
+        df["MolPrice_Penalty"] = 1.0
+        return df
+
+    # No penalty when thresholds are zero/equal (nocost mode)
+    if soft_threshold >= hard_threshold:
         df["MolPrice_Penalty"] = 1.0
         return df
 
