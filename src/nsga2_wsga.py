@@ -28,7 +28,7 @@ from wsga_helper import (
     evaluate_molecules,
     load_tox21_predictor,
     load_biodeg_model,
-    apply_niching,
+    compute_tanimoto_similarities,
     assign_validity,
     load_regression_models_with_aux,
     load_fom1_direct_models,
@@ -291,9 +291,8 @@ def nsga2_select(population_df, n_select, target, target_config, tau):
     Returns:
         Selected DataFrame with pareto_rank and crowding_distance columns.
     """
-    # Compute Tanimoto similarities (reuse existing niching infrastructure)
-    # apply_niching adds AvgTanimotoSimilarity column
-    population_df = apply_niching(population_df, tau=tau)
+    # Compute Tanimoto similarities (similarity only, no fitness penalty)
+    population_df = compute_tanimoto_similarities(population_df)
 
     # Compute 2 objectives
     objectives_2d = compute_nsga2_objectives(population_df, target, target_config)

@@ -761,12 +761,11 @@ def assign_validity(
     return df
 
 
-def apply_niching(df, tau=0.05, alpha=1000, p=2):
+def compute_tanimoto_similarities(df):
     """
-    Apply niching penalty based on Tanimoto similarity to promote diversity.
-    Uses precomputed fingerprints for efficiency.
+    Compute average Tanimoto similarity for each molecule in the population.
+    Adds 'AvgTanimotoSimilarity' column to df.
     """
-    # Precompute Morgan fingerprints
     fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=8, fpSize=2048)
 
     def mol_fp_gen(smiles_list):
@@ -777,7 +776,6 @@ def apply_niching(df, tau=0.05, alpha=1000, p=2):
 
     fingerprints = list(mol_fp_gen(df["SMILES"]))
 
-    # Compute average similarity for each molecule
     avg_similarities = []
     for i, fp_i in enumerate(fingerprints):
         if fp_i is None:
@@ -788,11 +786,20 @@ def apply_niching(df, tau=0.05, alpha=1000, p=2):
         avg_similarities.append(np.mean(sims) if sims else 0.0)
 
     df["AvgTanimotoSimilarity"] = avg_similarities
+    return df
+
+
+def apply_niching(df, tau=0.05, alpha=1000, p=2):
+    """
+    Apply niching penalty based on Tanimoto similarity to promote diversity.
+    Uses precomputed fingerprints for efficiency.
+    """
+    df = compute_tanimoto_similarities(df)
 
     # Apply niching penalty
     penalty = np.exp(-alpha * np.maximum(0, df["AvgTanimotoSimilarity"] - tau) ** p)
     df["NichedFitnessScore"] = df["FitnessScore"] * penalty * (1 - df["AvgTanimotoSimilarity"])
-    
+
     return df
 
 
