@@ -37,11 +37,12 @@ FIXED_PARAMS = {
 }
 
 MODELS = [
-    ("viscosity", "data/viscosity_cho_cleaned.csv", "kv_40C", "kv_100C", True),
-    ("density",   "data/density_cho_cleaned.csv",   "density_40C", "density_100C", False),
-    ("tc",        "data/tc_cho_cleaned.csv",        "tc_40C", "tc_100C", False),
-    ("cpsat",     "data/cpsat_cho_cleaned.csv",     "cpsat_40C", "cpsat_100C", False),
-    ("FOM1",      "data/FOM1_cho_cleaned.csv",      "FOM1_40C", "FOM1_100C", True),
+    ("density",   "../../data/nist_8100/density_cho_cleaned.csv",   "density_40C", "density_100C", False),
+    ("viscosity", "../../data/nist_8100/viscosity_cho_cleaned.csv", "kv_40C", "kv_100C", True),
+    ("tc",        "../../data/nist_8100/tc_cho_cleaned.csv",        "tc_40C", "tc_100C", False),
+    ("cpsat",     "../../data/nist_8100/cpsat_cho_cleaned.csv",     "cpsat_40C", "cpsat_100C", False),
+    ("beta",      "../../data/nist_8100/beta_cho_cleaned.csv",      "beta_40C", "beta_100C", False),
+    ("fom1",      "../../data/nist_8100/fom1_cho_cleaned.csv",      "FOM1_40C", "FOM1_100C", True),
 ]
 
 

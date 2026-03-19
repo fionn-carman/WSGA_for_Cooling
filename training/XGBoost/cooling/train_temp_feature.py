@@ -58,10 +58,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Properties that benefit from log-transform
-LOG_TARGETS_DEFAULT = {"kv"}
+LOG_TARGETS_DEFAULT = {"kv", "fom1"}
 
 # All available properties
-ALL_PROPERTIES = ["density", "kv", "tc", "cpsat"]
+ALL_PROPERTIES = ["density", "kv", "tc", "cpsat", "beta", "fom1"]
 
 
 # ============================================================
@@ -424,7 +424,7 @@ def main():
     parser.add_argument(
         "--data-dir",
         type=str,
-        default="./data_multitemp/long",
+        default="../../data/nist_8100/long",
         help="Directory containing long-format CSVs (used with --all)",
     )
     parser.add_argument(

@@ -29,7 +29,7 @@ fi
 
 # Activate Conda Environment
 eval "$(~/miniforge3/bin/conda shell.bash hook)"
-conda activate rdkit_env
+conda activate mol-rl
 
 cd "$DIRECTORY"
 
@@ -45,7 +45,7 @@ data_file="biodegradability_cleaned.csv"
 output_subdir="biodegradability"
 
 # Build command arguments
-cmd_args="--data_dir ./data --data_file $data_file --target $target_name --outdir ./output/$output_subdir --n_random_iter $N_ITER --n_rfe_repeats $RFE_REPEATS --rfe_step_size $STEP_SIZE"
+cmd_args="--data_dir ../data/constraints --data_file $data_file --target $target_name --outdir ./output/$output_subdir --n_random_iter $N_ITER --n_rfe_repeats $RFE_REPEATS --rfe_step_size $STEP_SIZE"
 
 # Log file
 mkdir -p "./output/${output_subdir}"
