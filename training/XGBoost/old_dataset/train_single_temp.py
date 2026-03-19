@@ -102,6 +102,7 @@ UNITS = {
     "viscosity": "Kinematic viscosity / cSt",
     "tc": "Thermal conductivity / W m$^{-1}$ K$^{-1}$",
     "cpsat": "$C_{p,sat}$ / J K$^{-1}$ mol$^{-1}$",
+    "beta": "Thermal expansion coeff. / K$^{-1}$",
     "fom1": "FOM1",
 }
 
@@ -110,6 +111,7 @@ MODELS = {
     "viscosity": {"csv": "Kinematic_Viscosity_40C_cleaned.csv",                    "col_40": "Kinematic_Viscosity_40C",        "log": True},
     "tc":        {"csv": "Thermal_Conductivity_40C_cleaned.csv",                   "col_40": "Thermal_Conductivity_40C",       "log": False},
     "cpsat":     {"csv": "Heat_Capacity_Constant_Pressure_40C_J_K_Mol_cleaned.csv","col_40": "Heat_Capacity_Sat_40C_J_K_Mol", "log": False},
+    "beta":      {"csv": "beta_40C_linear_cleaned.csv",                            "col_40": "beta_40C_linear",               "log": False},
     "fom1":      {"csv": "FOM1_exp_40_cleaned.csv",                                "col_40": "FOM1_sat_40",                   "log": True},
 }
 
@@ -655,7 +657,7 @@ def main():
     )
     parser.add_argument(
         "--properties", nargs="+", default=["all"],
-        help="Properties to train (density viscosity tc cpsat fom1) or 'all'",
+        help="Properties to train (density viscosity tc cpsat beta fom1) or 'all'",
     )
     parser.add_argument("--n_trials", type=int, default=100,
                         help="Optuna trials per fold")

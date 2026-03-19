@@ -2,7 +2,7 @@
 #PBS -N xgb_old_dataset
 #PBS -l walltime=06:00:00
 #PBS -l select=1:ncpus=8:mem=32gb
-#PBS -J 0-4
+#PBS -J 0-5
 #PBS -o /dev/null
 #PBS -e /dev/null
 
@@ -10,7 +10,7 @@
 # XGBoost Old Dataset Training (Mordred + Optuna)
 # ============================================================
 #
-# Trains 5 property models on the original ~833 molecule dataset
+# Trains 6 property models on the original ~833 molecule dataset
 # for direct comparison with NIST 8100 results. Identical methodology.
 #
 # Array indices:
@@ -18,14 +18,15 @@
 #   1 = viscosity  (831 molecules)
 #   2 = tc         (843 molecules)
 #   3 = cpsat      (661 molecules)
-#   4 = fom1       (638 molecules)
+#   4 = beta       (832 molecules, linear approx from density 40C/100C)
+#   5 = fom1       (638 molecules)
 #
 # Usage:
-#   qsub train_old_dataset_mordred.sh          # all 5 in parallel
+#   qsub train_old_dataset_mordred.sh          # all 6 in parallel
 #   qsub -J 0-0 train_old_dataset_mordred.sh   # single test (density)
 # ============================================================
 
-PROPERTIES=(density viscosity tc cpsat fom1)
+PROPERTIES=(density viscosity tc cpsat beta fom1)
 PROP=${PROPERTIES[$PBS_ARRAY_INDEX]}
 
 PROJ_DIR="/rds/general/user/fc4018/projects/fionn2023/live/WSGA_for_Cooling"

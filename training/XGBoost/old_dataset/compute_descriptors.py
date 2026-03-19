@@ -45,6 +45,7 @@ CSV_FILES = [
     "Thermal_Conductivity_40C_cleaned.csv",
     "Heat_Capacity_Constant_Pressure_40C_J_K_Mol_cleaned.csv",
     "FOM1_exp_40_cleaned.csv",
+    "beta_40C_linear_cleaned.csv",
 ]
 
 RDKIT_NAMES = [desc[0] for desc in Descriptors._descList]
