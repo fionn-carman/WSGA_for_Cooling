@@ -21,6 +21,7 @@ Usage:
 """
 
 import argparse
+import builtins
 import json
 import logging
 import math
@@ -52,6 +53,33 @@ from fold_utils import assign_folds, get_fold_indices
 
 warnings.filterwarnings("ignore", category=UserWarning)
 optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+# ---------------------------------------------------------------------------
+# SHAP monkey-patch: XGBoost base_score format bug ('[5.03E1]' as string)
+# ---------------------------------------------------------------------------
+_orig_float = builtins.float
+
+def _safe_float(x):
+    if isinstance(x, str) and x.startswith("[") and x.endswith("]"):
+        return _orig_float(x.strip("[]"))
+    return _orig_float(x)
+
+_real_builtins_float = builtins.float
+
+def _patch_float():
+    builtins.float = _safe_float
+
+def _unpatch_float():
+    builtins.float = _real_builtins_float
+
+_original_XGBTreeModelLoader_init = shap.explainers._tree.XGBTreeModelLoader.__init__
+def _patched_XGBTreeModelLoader_init(self, xgb_model):
+    _patch_float()
+    try:
+        _original_XGBTreeModelLoader_init(self, xgb_model)
+    finally:
+        _unpatch_float()
+shap.explainers._tree.XGBTreeModelLoader.__init__ = _patched_XGBTreeModelLoader_init
 
 # ---------------------------------------------------------------------------
 # Logging
