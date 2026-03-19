@@ -71,7 +71,7 @@ Multi-temperature datasets with values at 0, 10, 20, 30, 40, 50, 60, 70, 80, 90,
 | tc_cho_cleaned.csv | Thermal conductivity | 8,076 | 230 | W/mK |
 | cpsat_cho_cleaned.csv | Saturated liquid Cp | 7,388 | 230 | J/K/mol |
 | beta_cho_cleaned.csv | Thermal expansion coeff | 8,100 | 16 | 1/K |
-| fom1_cho_cleaned.csv | Figure of merit (FOM1) | 7,380 | 225 | W/mK |
+| fom1_cho_cleaned.csv | Figure of merit (FOM1) | 7,387 | 230 | W/mK |
 
 ### Property Ranges (40C and 100C)
 
@@ -82,11 +82,11 @@ Multi-temperature datasets with values at 0, 10, 20, 30, 40, 50, 60, 70, 80, 90,
 | Thermal conductivity / W mK-1 | 0.029 | 0.395 | 0.138 | 0.027 | 0.381 | 0.128 |
 | Cp_sat / J K-1 mol-1 | 58 | 951 | 351 | 120 | 1,010 | 386 |
 | Beta / K-1 | 0.0000 | 0.0022 | 0.0009 | -0.0026 | 0.0032 | 0.0010 |
-| FOM1 / W mK-1 | 14.6 | 186.9 | 74.5 | - | - | - |
+| FOM1 / W mK-1 | 14.6 | 186.9 | 74.5 | 17.9 | 201.8 | 93.7 |
 
 Notes:
 - Beta is computed from quadratic fit to density(T): rho(T) = a + bT + cT2, beta = -(1/rho) drho/dT
-- FOM1 = k * (beta * Cp * rho / (nu * k))^0.2813, computed at 40C only in this file
+- FOM1 = k * (beta * Cp * rho / (nu * k))^0.2813, computed at all 11 temperatures
 - Cp is molar saturated liquid heat capacity (NOT ideal gas)
 - Beta has 16 columns (SMILES, name, 11 temps, fit_r2, n_points, flag) — no RDKit descriptors
 - Some molecules have negative beta at extreme temperatures (flagged)
