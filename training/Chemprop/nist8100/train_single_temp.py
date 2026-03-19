@@ -35,6 +35,34 @@ import time
 import warnings
 from pathlib import Path
 
+# ---------------------------------------------------------------------------
+# Chemprop v1 / sklearn >=1.6 compatibility patch
+# sklearn removed the `squared` kwarg from mean_squared_error in v1.6.
+# Chemprop v1.6.1 uses it in train/metrics.py. Monkey-patch before import.
+# ---------------------------------------------------------------------------
+import sklearn.metrics as _skm
+_orig_mse = _skm.mean_squared_error
+
+def _patched_mse(y_true, y_pred, *, squared=True, **kwargs):
+    mse = _orig_mse(y_true, y_pred, **kwargs)
+    return mse if squared else mse ** 0.5
+
+_skm.mean_squared_error = _patched_mse
+
+# PyTorch 2.6 changed torch.load default to weights_only=True.
+# Chemprop v1 checkpoints contain argparse.Namespace which isn't allowed.
+# Patch torch.load to default to weights_only=False for chemprop compat.
+import torch as _torch
+_orig_torch_load = _torch.load
+
+def _patched_torch_load(*args, **kwargs):
+    if "weights_only" not in kwargs:
+        kwargs["weights_only"] = False
+    return _orig_torch_load(*args, **kwargs)
+
+_torch.load = _patched_torch_load
+# ---------------------------------------------------------------------------
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -85,19 +113,20 @@ FIGURE_DIR = SCRIPT_DIR / "figures" / "single_temp"
 
 
 # ============================================================
-# Chemprop model building (v1 CLI)
+# Chemprop model building (v1 Python API, in-process)
 # ============================================================
 
 def build_chemprop_model(train_smiles, train_targets, test_smiles,
-                         epochs=100, patience=20, batch_size=64,
-                         lr=1e-4, fold_i=0, save_dir=None):
+                         epochs=100, batch_size=64, lr=1e-4,
+                         fold_i=0, save_dir=None):
     """
     Train a Chemprop D-MPNN and return test predictions.
 
-    Uses Chemprop v1.6.1 CLI (chemprop_train / chemprop_predict):
-    - hidden_size=300, depth=3, ffn_num_layers=2, dropout=0.0
-    - Early stopping on validation RMSE (10% split, patience epochs)
-    - GPU via --gpu 0 if CUDA available
+    Uses Chemprop v1.6.1 Python API in-process (not CLI subprocess)
+    so our sklearn compatibility patch is active.
+
+    Config: hidden_size=300, depth=3, ffn_num_layers=2, dropout=0.0.
+    90/10 random train/val split for early stopping.
     """
     import torch
 
@@ -105,8 +134,8 @@ def build_chemprop_model(train_smiles, train_targets, test_smiles,
     try:
         train_csv = os.path.join(tmpdir, "train.csv")
         test_csv = os.path.join(tmpdir, "test.csv")
-        pred_csv = os.path.join(tmpdir, "preds.csv")
         model_dir = save_dir if save_dir else os.path.join(tmpdir, "model")
+        os.makedirs(model_dir, exist_ok=True)
 
         # Write train CSV
         with open(train_csv, "w", newline="") as f:
@@ -115,15 +144,21 @@ def build_chemprop_model(train_smiles, train_targets, test_smiles,
             for smi, val in zip(train_smiles, train_targets):
                 w.writerow([smi, val])
 
-        # Write test CSV
+        # Write test CSV (with dummy targets for make_predictions)
         with open(test_csv, "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["smiles", "target"])
             for smi in test_smiles:
                 w.writerow([smi, ""])
 
-        # Build train command
-        train_cmd = [
+        # Call chemprop CLI entry points in-process so our sklearn
+        # compatibility monkey-patch is active.
+        import sys
+
+        gpu_args = ["--gpu", "0"] if torch.cuda.is_available() else []
+
+        # Train
+        sys.argv = [
             "chemprop_train",
             "--data_path", train_csv,
             "--dataset_type", "regression",
@@ -138,55 +173,29 @@ def build_chemprop_model(train_smiles, train_targets, test_smiles,
             "--ffn_num_layers", "2",
             "--dropout", "0.0",
             "--split_sizes", "0.9", "0.1", "0.0",
-            "--split_key_molecule", "0",
             "--seed", str(fold_i),
-            "--metric", "rmse",
             "--quiet",
-        ]
+        ] + gpu_args
 
-        # Use GPU if available
-        if torch.cuda.is_available():
-            train_cmd.extend(["--gpu", "0"])
-
-        result = subprocess.run(
-            train_cmd, capture_output=True, text=True, timeout=3600,
-        )
-        if result.returncode != 0:
-            logger.error("chemprop_train failed (fold %d): %s", fold_i, result.stderr[-500:])
-            raise RuntimeError(f"chemprop_train failed: {result.stderr[-200:]}")
+        from chemprop.train import chemprop_train
+        chemprop_train()
 
         # Predict
-        pred_cmd = [
+        pred_csv = os.path.join(tmpdir, "preds.csv")
+        sys.argv = [
             "chemprop_predict",
             "--test_path", test_csv,
             "--checkpoint_dir", model_dir,
             "--preds_path", pred_csv,
-        ]
-        if torch.cuda.is_available():
-            pred_cmd.extend(["--gpu", "0"])
+        ] + gpu_args
 
-        result = subprocess.run(
-            pred_cmd, capture_output=True, text=True, timeout=600,
-        )
-        if result.returncode != 0:
-            logger.error("chemprop_predict failed (fold %d): %s", fold_i, result.stderr[-500:])
-            raise RuntimeError(f"chemprop_predict failed: {result.stderr[-200:]}")
+        from chemprop.train import chemprop_predict
+        chemprop_predict()
 
-        # Read predictions
         preds_df = pd.read_csv(pred_csv)
         y_pred = preds_df.iloc[:, 1].values.astype(np.float64)
 
-        # Parse stopped epoch from verbose output if available
-        stopped_epoch = epochs  # default
-        if result.stdout:
-            for line in result.stdout.split("\n"):
-                if "Epoch" in line:
-                    try:
-                        stopped_epoch = int(line.split("Epoch")[1].split("/")[0].strip())
-                    except (ValueError, IndexError):
-                        pass
-
-        return y_pred, stopped_epoch
+        return y_pred, epochs
 
     finally:
         # Clean up tmpdir (but not save_dir)
@@ -337,7 +346,6 @@ def train_property(prop_name: str, prop_config: dict,
             train_smiles, y_train.tolist(),
             test_smiles,
             epochs=epochs,
-            patience=patience,
             batch_size=batch_size,
             lr=lr,
             fold_i=fold_i,
