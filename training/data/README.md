@@ -66,12 +66,12 @@ Multi-temperature datasets with values at 0, 10, 20, 30, 40, 50, 60, 70, 80, 90,
 
 | File | Property | Molecules | Columns | Unit |
 |------|----------|-----------|---------|------|
-| density_cho_cleaned.csv | Liquid density | 8,100 | 230 | g/cm3 |
-| viscosity_cho_cleaned.csv | Kinematic viscosity | 8,100 | 230 | cSt |
-| tc_cho_cleaned.csv | Thermal conductivity | 8,076 | 230 | W/mK |
-| cpsat_cho_cleaned.csv | Saturated liquid Cp | 7,388 | 230 | J/K/mol |
-| beta_cho_cleaned.csv | Thermal expansion coeff | 8,100 | 16 | 1/K |
-| fom1_cho_cleaned.csv | Figure of merit (FOM1) | 7,387 | 230 | W/mK |
+| density_cho_cleaned.csv | Liquid density | 8,082 | 230 | g/cm3 |
+| viscosity_cho_cleaned.csv | Kinematic viscosity | 8,082 | 230 | cSt |
+| tc_cho_cleaned.csv | Thermal conductivity | 8,062 | 230 | W/mK |
+| cpsat_cho_cleaned.csv | Saturated liquid Cp | 7,377 | 230 | J/K/mol |
+| beta_cho_cleaned.csv | Thermal expansion coeff | 8,082 | 16 | 1/K |
+| fom1_cho_cleaned.csv | Figure of merit (FOM1) | 7,376 | 230 | W/mK |
 
 ### Property Ranges (40C and 100C)
 
@@ -89,7 +89,7 @@ Notes:
 - FOM1 = k * (beta * Cp * rho / (nu * k))^0.2813, computed at all 11 temperatures
 - Cp is molar saturated liquid heat capacity (NOT ideal gas)
 - Beta has 16 columns (SMILES, name, 11 temps, fit_r2, n_points, flag) — no RDKit descriptors
-- Some molecules have negative beta at extreme temperatures (flagged)
+- 18 molecules with negative beta at any temperature removed from all datasets
 
 ## Old Dataset (Reference)
 
