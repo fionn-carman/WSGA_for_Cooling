@@ -35,10 +35,13 @@ corrected formula with quadratic beta and saturated liquid Cp.
 
 ### old_dataset/
 
-The original hydrocarbon dataset (~850 molecules) used in early model training.
-Sourced from literature compilations and experimental databases. Superseded by
-nist_8100 for thermophysical models but retained for reference and comparison.
-Heat capacity and FOM1 files use saturated liquid Cp (not ideal gas).
+Contains both the original ~850-molecule hydrocarbon dataset used in early model
+training and the full NIST multi-temperature extractions (all elements, up to
+19,314 unique molecules across properties). The `*_full.csv` files are the raw
+NIST extractions before CHO filtering and outlier removal — they include
+heteroatom-containing molecules (N, S, halogens, etc.) and cover 0-100C in 10C
+steps. The per-property `*_cleaned.csv` files are the old dataset spin-offs
+with saturated liquid Cp (not ideal gas).
 
 ---
 
@@ -109,7 +112,11 @@ Files in `old_dataset/`. Superseded by nist_8100 but kept for comparison.
 | Heat_Capacity_Constant_Pressure_100C_J_K_Mol_cleaned.csv | Cp_sat 100C | 660 | 131 |
 | FOM1_exp_40_cleaned.csv | FOM1 40C | 638 | 219 |
 | FOM1_exp_100_cleaned.csv | FOM1 100C | 638 | 219 |
-| nist_wtt_raw_extract.csv | Full NIST WTT extraction (all SMILES) | 5,453 | multi-temp properties |
+| density_full.csv | NIST density (all molecules, all elements) | 18,618 | 13 |
+| viscosity_full.csv | NIST viscosity (all molecules) | 16,963 | 13 |
+| tc_full.csv | NIST thermal conductivity (all molecules) | 17,366 | 13 |
+| cpsat_full.csv | NIST Cp_sat (all molecules) | 14,553 | 13 |
+| FOM1_full.csv | NIST FOM1 (all molecules) | 13,832 | 13 |
 
 Notes:
 - Old dataset has 131 columns (fewer RDKit descriptors from older RDKit version)
