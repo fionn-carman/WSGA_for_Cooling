@@ -5,7 +5,7 @@ For each molecule, fits quadratic ρ(T) = a + bT + cT² to density data,
 then evaluates β(T) = -(1/ρ(T)) × dρ/dT at each temperature.
 
 Input:  training/data/nist_8100/density_cho_cleaned.csv
-Output: training/data/nist_8100/beta_all_temps.csv
+Output: training/data/nist_8100/beta_cho_cleaned.csv
 """
 
 import numpy as np
@@ -101,7 +101,7 @@ def main():
                  ["fit_r2", "n_points", "flag"])
     beta_df = beta_df[col_order]
 
-    out_path = DATA_DIR / "beta_all_temps.csv"
+    out_path = DATA_DIR / "beta_cho_cleaned.csv"
     beta_df.to_csv(out_path, index=False)
 
     # Summary

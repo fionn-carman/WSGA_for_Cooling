@@ -3,7 +3,7 @@ Baseline FOM1 Evaluation — NIST 8,100-molecule dataset
 
 Evaluates the new NIST dataset to establish baseline FOM1 performance:
 
-1. Load pre-computed FOM1 from training/data/nist_8100/FOM1_improved_40C.csv
+1. Load pre-computed FOM1 from training/data/nist_8100/fom1_cho_cleaned.csv
    (7,380 molecules with quadratic beta, Sat Cp, computed FOM1)
 2. Load multi-temperature experimental properties (density, viscosity, TC, Cp)
 3. Predict safety constraint properties (MP, FP, BP, DC, Tox21, Biodeg)
@@ -99,7 +99,7 @@ def load_nist_dataset(nist_dir):
     and molecular weight.
     """
     # Primary: FOM1 dataset (7,380 molecules with pre-computed FOM1)
-    fom1_path = os.path.join(nist_dir, "FOM1_improved_40C.csv")
+    fom1_path = os.path.join(nist_dir, "fom1_cho_cleaned.csv")
     df = pd.read_csv(fom1_path)
     print(f"  FOM1 dataset: {len(df)} molecules")
 
@@ -137,27 +137,32 @@ def load_nist_dataset(nist_dir):
         df = df.merge(cp, on="SMILES", how="left")
 
     # Load beta (for 100C FOM1)
-    beta_path = os.path.join(nist_dir, "beta_40C.csv")
+    beta_path = os.path.join(nist_dir, "beta_cho_cleaned.csv")
     if os.path.exists(beta_path):
-        # beta_40C.csv has density at both temps, can compute beta for 100C
         beta_df = pd.read_csv(beta_path)
+        # Merge beta_40C if not already in df (from FOM1 file)
         if "beta_40C" not in df.columns and "beta_40C" in beta_df.columns:
             df = df.merge(beta_df[["SMILES", "beta_40C"]], on="SMILES", how="left")
+        # Also merge beta_100C for FOM1_100C computation
+        if "beta_100C" in beta_df.columns:
+            df = df.merge(beta_df[["SMILES", "beta_100C"]], on="SMILES", how="left")
 
     return df
 
 
 def compute_fom1_100c(df):
     """Compute FOM1 at 100C from component properties."""
+    # Use beta_100C if available, fall back to beta_40C
+    beta_col = "beta_100C" if "beta_100C" in df.columns else "beta_40C"
     required = ["tc_100C_W_mK", "density_100C_g_cm3", "cpsat_100C_J_K_mol",
-                 "kv_100C_cSt", "beta_40C", "MolWt"]
+                 "kv_100C_cSt", beta_col, "MolWt"]
     mask = df[required].notna().all(axis=1)
 
     k = df["tc_100C_W_mK"]
     Cp = df["cpsat_100C_J_K_mol"] / df["MolWt"] * 1000  # J/(kg K)
     nu = df["kv_100C_cSt"] * 1e-6  # m^2/s
     rho = df["density_100C_g_cm3"]
-    beta = df["beta_40C"]  # same beta (computed from density gradient)
+    beta = df[beta_col]
     rho_kg = rho * 1000
 
     fom1_100 = k * ((beta * Cp * rho_kg) / (nu * k)) ** 0.2813
