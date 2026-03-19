@@ -27,6 +27,7 @@ Collected from the NIST WebBook and NIST Thermodynamics Research Center (TRC)
 via the Web Thermo Tables (WTT) interface. Restricted to CHO-only molecules
 (carbon, hydrogen, oxygen) that are liquid at relevant temperatures. Solids and
 molecules with density above 1.5 g/cm3 or below 0.4 g/cm3 were removed.
+**Gitignored — this is private NIST data and must not be pushed to public repos.**
 Each property file contains experimental values at 11 temperatures (0-100C in
 10C steps) plus 217 RDKit descriptors. Beta was computed from a quadratic fit
 to density(T) and FOM1 was computed from component properties using the
@@ -108,7 +109,7 @@ Files in `old_dataset/`. Superseded by nist_8100 but kept for comparison.
 | Heat_Capacity_Constant_Pressure_100C_J_K_Mol_cleaned.csv | Cp_sat 100C | 660 | 131 |
 | FOM1_exp_40_cleaned.csv | FOM1 40C | 638 | 219 |
 | FOM1_exp_100_cleaned.csv | FOM1 100C | 638 | 219 |
-| training_reference.csv | SMILES reference list | 5,997 | 1 |
+| nist_wtt_raw_extract.csv | Full NIST WTT extraction (all SMILES) | 5,453 | multi-temp properties |
 
 Notes:
 - Old dataset has 131 columns (fewer RDKit descriptors from older RDKit version)
