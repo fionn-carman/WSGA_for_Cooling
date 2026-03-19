@@ -11,9 +11,9 @@
 # ============================================================
 #
 # Trains 6 property models at 40C with:
-#   - D-MPNN (BondMessagePassing, depth=3, d_h=300)
+#   - D-MPNN via chemprop v1 CLI (hidden_size=300, depth=3)
 #   - Hash-based 5-fold CV (same folds as XGBoost/MLP)
-#   - PyTorch Lightning (100 epochs, patience 20)
+#   - 100 epochs, early stopping on val RMSE
 #   - Publication-quality parity + diagnostics plots
 #
 # Array indices:
@@ -54,7 +54,7 @@ cd "$TRAIN_DIR"
 
 python train_single_temp.py \
     --properties "$PROP" \
-    --max_epochs 100 \
+    --epochs 100 \
     --patience 20 \
     --batch_size 64 \
     --lr 1e-4

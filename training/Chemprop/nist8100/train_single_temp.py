@@ -2,31 +2,35 @@
 """
 Publication-quality Chemprop D-MPNN training pipeline for NIST 8100 single-temp models.
 
-Hash-based 5-fold outer CV with Chemprop v2 Python API. No Optuna — D-MPNN uses
-well-validated defaults (depth=3, d_h=300, lr=1e-4, early stopping).
+Hash-based 5-fold outer CV with Chemprop v1 CLI. No Optuna — D-MPNN uses
+well-validated defaults (depth=3, hidden_size=300, lr=1e-4, early stopping).
 
 Pipeline per property (40C):
   1. Load property CSV, extract SMILES + target column
   2. Apply log1p transform if needed (viscosity, fom1)
   3. Hash-based 5-fold assignment
   4. Per outer fold:
-     a. Build Chemprop MoleculeDataset from SMILES
-     b. Train D-MPNN with PyTorch Lightning (100 epochs, patience 20)
-     c. Predict on held-out test set, collect per-molecule predictions
+     a. Write temp train/test CSVs (columns: smiles, target)
+     b. Train via chemprop_train CLI (100 epochs, patience 20)
+     c. Predict via chemprop_predict CLI on held-out test set
   5. Aggregate predictions, compute metrics in real space
   6. Save outputs + plots
 
 Usage:
     python train_single_temp.py                      # all 6 properties
     python train_single_temp.py --properties density  # single property
-    python train_single_temp.py --max_epochs 10       # quick test
+    python train_single_temp.py --epochs 10           # quick test
 """
 
 import argparse
+import csv
 import json
 import logging
 import math
 import os
+import shutil
+import subprocess
+import tempfile
 import time
 import warnings
 from pathlib import Path
@@ -81,118 +85,115 @@ FIGURE_DIR = SCRIPT_DIR / "figures" / "single_temp"
 
 
 # ============================================================
-# Chemprop model building
+# Chemprop model building (v1 CLI)
 # ============================================================
 
 def build_chemprop_model(train_smiles, train_targets, test_smiles,
-                         max_epochs=100, patience=20, batch_size=64,
+                         epochs=100, patience=20, batch_size=64,
                          lr=1e-4, fold_i=0, save_dir=None):
     """
     Train a Chemprop D-MPNN and return test predictions.
 
-    Uses Chemprop v2 Python API:
-    - BondMessagePassing(d_h=300, depth=3)
-    - RegressionFFN(hidden_dim=300, n_layers=2)
-    - MPNN with batch_norm
-    - PyTorch Lightning trainer with early stopping
+    Uses Chemprop v1.6.1 CLI (chemprop_train / chemprop_predict):
+    - hidden_size=300, depth=3, ffn_num_layers=2, dropout=0.0
+    - Early stopping on validation RMSE (10% split, patience epochs)
+    - GPU via --gpu 0 if CUDA available
     """
     import torch
-    import lightning as pl
-    from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 
-    from chemprop.data import (
-        MoleculeDatapoint,
-        MoleculeDataset,
-        build_dataloader,
-    )
-    from chemprop.models import MPNN
-    from chemprop.nn import (
-        BondMessagePassing,
-        BinaryClassificationFFN,
-        RegressionFFN,
-        MeanAggregation,
-    )
+    tmpdir = tempfile.mkdtemp()
+    try:
+        train_csv = os.path.join(tmpdir, "train.csv")
+        test_csv = os.path.join(tmpdir, "test.csv")
+        pred_csv = os.path.join(tmpdir, "preds.csv")
+        model_dir = save_dir if save_dir else os.path.join(tmpdir, "model")
 
-    # Build datasets
-    train_data = [MoleculeDatapoint(smi, [val])
-                  for smi, val in zip(train_smiles, train_targets)]
-    test_data = [MoleculeDatapoint(smi, [0.0])
-                 for smi in test_smiles]
+        # Write train CSV
+        with open(train_csv, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["smiles", "target"])
+            for smi, val in zip(train_smiles, train_targets):
+                w.writerow([smi, val])
 
-    train_dataset = MoleculeDataset(train_data)
-    test_dataset = MoleculeDataset(test_data)
+        # Write test CSV
+        with open(test_csv, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["smiles", "target"])
+            for smi in test_smiles:
+                w.writerow([smi, ""])
 
-    train_loader = build_dataloader(train_dataset, shuffle=True,
-                                    batch_size=batch_size, num_workers=0)
-    test_loader = build_dataloader(test_dataset, shuffle=False,
-                                   batch_size=batch_size, num_workers=0)
+        # Build train command
+        train_cmd = [
+            "chemprop_train",
+            "--data_path", train_csv,
+            "--dataset_type", "regression",
+            "--save_dir", model_dir,
+            "--epochs", str(epochs),
+            "--batch_size", str(batch_size),
+            "--init_lr", str(lr),
+            "--max_lr", str(lr * 10),
+            "--final_lr", str(lr / 10),
+            "--hidden_size", "300",
+            "--depth", "3",
+            "--ffn_num_layers", "2",
+            "--dropout", "0.0",
+            "--split_sizes", "0.9", "0.1", "0.0",
+            "--split_key_molecule", "0",
+            "--seed", str(fold_i),
+            "--metric", "rmse",
+            "--quiet",
+        ]
 
-    # Split train into train/val for early stopping (90/10)
-    n_train = len(train_dataset)
-    n_val = max(1, int(n_train * 0.1))
-    n_tr = n_train - n_val
+        # Use GPU if available
+        if torch.cuda.is_available():
+            train_cmd.extend(["--gpu", "0"])
 
-    # Deterministic split based on fold index
-    rng = torch.Generator().manual_seed(fold_i)
-    tr_subset, val_subset = torch.utils.data.random_split(
-        train_dataset, [n_tr, n_val], generator=rng
-    )
-    train_loader = build_dataloader(tr_subset, shuffle=True,
-                                    batch_size=batch_size, num_workers=0)
-    val_loader = build_dataloader(val_subset, shuffle=False,
-                                  batch_size=batch_size, num_workers=0)
-
-    # Build model
-    mp = BondMessagePassing(d_h=300, d_e=14, depth=3, dropout=0.0)
-    agg = MeanAggregation()
-    ffn = RegressionFFN(input_dim=300, hidden_dim=300, n_layers=2, dropout=0.0)
-    model = MPNN(message_passing=mp, agg=agg, ffn=ffn, batch_norm=True)
-
-    # Callbacks
-    callbacks = [
-        EarlyStopping(monitor="val_loss", patience=patience, mode="min"),
-    ]
-    if save_dir is not None:
-        Path(save_dir).mkdir(parents=True, exist_ok=True)
-        callbacks.append(
-            ModelCheckpoint(
-                dirpath=save_dir,
-                filename="best",
-                monitor="val_loss",
-                mode="min",
-                save_top_k=1,
-            )
+        result = subprocess.run(
+            train_cmd, capture_output=True, text=True, timeout=3600,
         )
+        if result.returncode != 0:
+            logger.error("chemprop_train failed (fold %d): %s", fold_i, result.stderr[-500:])
+            raise RuntimeError(f"chemprop_train failed: {result.stderr[-200:]}")
 
-    # Trainer
-    trainer = pl.Trainer(
-        max_epochs=max_epochs,
-        callbacks=callbacks,
-        enable_progress_bar=False,
-        accelerator="auto",
-        devices=1,
-        logger=False,
-        enable_model_summary=False,
-    )
-    trainer.fit(model, train_loader, val_loader)
+        # Predict
+        pred_cmd = [
+            "chemprop_predict",
+            "--test_path", test_csv,
+            "--checkpoint_dir", model_dir,
+            "--preds_path", pred_csv,
+        ]
+        if torch.cuda.is_available():
+            pred_cmd.extend(["--gpu", "0"])
 
-    # Load best checkpoint if available
-    if save_dir is not None:
-        ckpt_path = Path(save_dir) / "best.ckpt"
-        if ckpt_path.exists():
-            model = MPNN.load_from_checkpoint(str(ckpt_path))
+        result = subprocess.run(
+            pred_cmd, capture_output=True, text=True, timeout=600,
+        )
+        if result.returncode != 0:
+            logger.error("chemprop_predict failed (fold %d): %s", fold_i, result.stderr[-500:])
+            raise RuntimeError(f"chemprop_predict failed: {result.stderr[-200:]}")
 
-    # Predict
-    preds = trainer.predict(model, test_loader)
-    y_pred = torch.cat([p.squeeze(-1) if p.dim() > 1 else p for p in preds]).numpy()
+        # Read predictions
+        preds_df = pd.read_csv(pred_csv)
+        y_pred = preds_df.iloc[:, 1].values.astype(np.float64)
 
-    # If predictions are 2D (batch x 1), flatten
-    if y_pred.ndim > 1:
-        y_pred = y_pred.squeeze(-1)
+        # Parse stopped epoch from verbose output if available
+        stopped_epoch = epochs  # default
+        if result.stdout:
+            for line in result.stdout.split("\n"):
+                if "Epoch" in line:
+                    try:
+                        stopped_epoch = int(line.split("Epoch")[1].split("/")[0].strip())
+                    except (ValueError, IndexError):
+                        pass
 
-    stopped_epoch = trainer.current_epoch
+        return y_pred, stopped_epoch
 
-    return y_pred, stopped_epoch
+    finally:
+        # Clean up tmpdir (but not save_dir)
+        if save_dir and os.path.abspath(tmpdir) != os.path.abspath(save_dir):
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        elif not save_dir:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # ============================================================
@@ -285,7 +286,7 @@ def save_diagnostics_plot(y_true, y_pred, out_dir, prop_name):
 # ============================================================
 
 def train_property(prop_name: str, prop_config: dict,
-                   max_epochs: int, batch_size: int, lr: float,
+                   epochs: int, batch_size: int, lr: float,
                    patience: int) -> dict:
     """Full 5-fold CV pipeline for a single property at 40C."""
     t0_total = time.time()
@@ -335,7 +336,7 @@ def train_property(prop_name: str, prop_config: dict,
         preds, stopped_epoch = build_chemprop_model(
             train_smiles, y_train.tolist(),
             test_smiles,
-            max_epochs=max_epochs,
+            epochs=epochs,
             patience=patience,
             batch_size=batch_size,
             lr=lr,
@@ -428,7 +429,7 @@ def train_property(prop_name: str, prop_config: dict,
             "ffn_n_layers": 2,
             "dropout": 0.0,
             "batch_norm": True,
-            "max_epochs": max_epochs,
+            "epochs": epochs,
             "patience": patience,
             "batch_size": batch_size,
             "lr": lr,
@@ -456,7 +457,7 @@ def main():
         "--properties", nargs="+", default=["all"],
         help="Properties to train (density viscosity tc cpsat beta fom1) or 'all'",
     )
-    parser.add_argument("--max_epochs", type=int, default=100,
+    parser.add_argument("--epochs", type=int, default=100,
                         help="Maximum training epochs per fold")
     parser.add_argument("--patience", type=int, default=20,
                         help="Early stopping patience")
@@ -481,8 +482,8 @@ def main():
     # Train
     logger.info("=" * 70)
     logger.info("Chemprop D-MPNN: Training %d properties at 40C", len(properties))
-    logger.info("  max_epochs=%d, patience=%d, batch_size=%d, lr=%.1e",
-                args.max_epochs, args.patience, args.batch_size, args.lr)
+    logger.info("  epochs=%d, patience=%d, batch_size=%d, lr=%.1e",
+                args.epochs, args.patience, args.batch_size, args.lr)
     logger.info("=" * 70)
 
     results = {}
@@ -490,7 +491,7 @@ def main():
         logger.info("--- %s ---", prop_name.upper())
         summary = train_property(
             prop_name, MODELS[prop_name],
-            max_epochs=args.max_epochs,
+            epochs=args.epochs,
             batch_size=args.batch_size,
             lr=args.lr,
             patience=args.patience,
