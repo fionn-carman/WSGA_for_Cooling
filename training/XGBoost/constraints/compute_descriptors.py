@@ -44,6 +44,7 @@ CSV_FILES = [
     "MP-Measured_cleaned.csv",
     "BP-Measured_cleaned.csv",
     "flashpoint_cleaned.csv",
+    "biodegradability_cleaned.csv",
 ]
 
 RDKIT_NAMES = [desc[0] for desc in Descriptors._descList]
