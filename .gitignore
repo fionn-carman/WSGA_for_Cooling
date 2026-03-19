@@ -1,6 +1,8 @@
-# Outputs
+# Archive (old models, data, experiments)
+archive/
+
+# GA run outputs
 outputs/
-BaselineFOM1Eval/
 
 # Python
 __pycache__/
@@ -29,10 +31,10 @@ src/logs/
 *.log
 *.synctex.gz
 
-# Compiled PDFs (keep .tex source tracked)
+# Compiled PDFs
 *.pdf
 
-# Saved models
+# Saved models (binary)
 *.joblib
 
 # Large binary files
@@ -42,18 +44,17 @@ src/logs/
 # ChemBERTa local model cache
 chemberta_model/
 
-# GT4SD Tox21 pretrained weights (download via minio, see README)
+# GT4SD Tox21 pretrained weights
 models/tox21_gt4sd/
 
-# Testing / experimental work (not part of the core pipeline)
+# Testing / experimental work
 testing/
 
-# Literature discovery pipeline (vault notes live in WSGA_Notes, not here)
+# Literature discovery pipeline
 literature/
 
-# NIST WTT data collection (track curated data, ignore collection scripts)
-NIST_WTT_Collection/*
-!NIST_WTT_Collection/data/
+# NIST WTT data collection (entire directory)
+NIST_WTT_Collection/
 
 # Claude Code
 CLAUDE.md
