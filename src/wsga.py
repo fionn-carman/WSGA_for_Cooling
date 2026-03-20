@@ -31,8 +31,8 @@ from wsga_helper import (
     compute_fitness,
     apply_molprice_penalty,
     load_regression_models_with_aux,
-    load_fom1_direct_models,
     is_stable_fragment,
+    compute_mahalanobis_params,
 )
 from evaluation import get_scscore_cached, strict_canonicalize_smiles
 from fragment_utils import prepare_fragments, crossover_fragments, crossover_mol_fragments
@@ -73,15 +73,12 @@ parser.add_argument("--mutation_rate", type=float, default=0.8, help="Mutation r
 parser.add_argument("--output_dir", type=str, default="../outputs", help="Output directory")
 parser.add_argument("--data_dir", type=str, default="../data", help="Data directory containing all CSV files")
 parser.add_argument("--model_dir", type=str, default="../models", help="Model directory")
+parser.add_argument("--training_data_dir", type=str, default="../training/data",
+    help="Training data directory (for Mahalanobis OOD detection)")
 parser.add_argument("--Tau", type=float, default=0.05, help="Threshold for niching")
 parser.add_argument("--target", type=str, default="FOM1",
-    choices=["alpha", "beta", "Pr", "Gr", "Ra", "Nu", "FOM1", "FOM1_40", "FOM1_100",
-             "FOM1_direct", "FOM1_direct_40", "FOM1_direct_100"],
+    choices=["alpha", "FOM1", "FOM1_40", "FOM1_direct"],
     help="Target property to optimize"
-)
-parser.add_argument("--fom1_model_dir", type=str,
-    default="../models",
-    help="Directory containing FOM1 direct prediction models (FOM1_direct_5fold_40C/ and FOM1_direct_5fold_100C/)"
 )
 parser.add_argument("--top_n", type=int, default=40, help="Number of top molecules to track and visualize")
 parser.add_argument("--num_generations", type=int, default=200, help="Number of generations to run")
@@ -150,18 +147,10 @@ TOP_N = args.top_n  # Number of top molecules to track per generation
 # Fitness Target
 TARGET = args.target
 TARGET_CONFIG = {
-    "alpha": {"column": "alpha_avg", "maximize": True},
-    "beta":  {"column": "beta_avg",  "maximize": True},
-    "Pr":    {"column": "Pr_avg",    "maximize": False},
-    "Gr":    {"column": "Gr_avg",    "maximize": True},
-    "Ra":    {"column": "Ra_avg",    "maximize": True},
-    "Nu":    {"column": "Nu_avg",    "maximize": True},
-    "FOM1":  {"column": "FOM1_avg",  "maximize": True},
-    "FOM1_40":  {"column": "FOM1_40",  "maximize": True},
-    "FOM1_100": {"column": "FOM1_100", "maximize": True},
-    "FOM1_direct":     {"column": "FOM1_direct_avg",  "maximize": True},
-    "FOM1_direct_40":  {"column": "FOM1_40C_direct",  "maximize": True},
-    "FOM1_direct_100": {"column": "FOM1_100C_direct", "maximize": True},
+    "alpha":       {"column": "alpha_40",  "maximize": True},
+    "FOM1":        {"column": "fom1_40C",  "maximize": True},
+    "FOM1_40":     {"column": "FOM1_40",   "maximize": True},
+    "FOM1_direct": {"column": "fom1_40C",  "maximize": True},
 }
 
 # Selection Criteria (validity thresholds) - from args for case studies
@@ -236,7 +225,7 @@ else:
     print(f"MolPrice penalty: disabled (no --molprice_model)")
 print(f"--- Stability Mode ---")
 print(f"Stability mode: {STABILITY_MODE}")
-print(f"FOM1 model dir: {args.fom1_model_dir}")
+print(f"Training data dir: {args.training_data_dir}")
 print(f"==============================================")
 
 
@@ -339,25 +328,17 @@ if STABILITY_MODE == "strict":
 TRACKED_PROPERTIES = [
     # Fitness
     'FitnessScore', 'NichedFitnessScore', 'AvgTanimotoSimilarity', 'is_valid',
-    # Thermophysical - 40C
-    'Density_40C_g_cm^3', 'Kinematic_Viscosity_40C', 'Thermal_Conductivity_40C',
-    'Heat_Capacity_Constant_Pressure_40C_J_K_Mol',
-    # Thermophysical - 100C
-    'Density_100C_g_cm^3', 'Kinematic_Viscosity_100C', 'Thermal_Conductivity_100C',
-    'Heat_Capacity_Constant_Pressure_100C_J_K_Mol',
-    # Derived properties
-    'alpha_40', 'alpha_100', 'alpha_avg',
-    'beta_40', 'beta_100', 'beta_avg',
-    'Ra_40', 'Ra_100', 'Ra_avg',
-    'FOM1_40', 'FOM1_100', 'FOM1_avg',
-    'FOM1_40C_direct', 'FOM1_100C_direct', 'FOM1_direct_avg',
-    'Pr_40', 'Pr_100', 'Pr_avg',
-    'Gr_40', 'Gr_100', 'Gr_avg',
-    'Nu_40', 'Nu_100', 'Nu_avg',
+    # Thermophysical predictions (40C)
+    'density_40C', 'viscosity_40C', 'tc_40C', 'cpsat_40C', 'beta_40C', 'fom1_40C',
+    # Derived
+    'MW', 'Cp_40', 'alpha_40', 'nu_40', 'FOM1_40',
+    # Constraints
+    'bp', 'mp', 'fp', 'dc',
     # Safety/Synthesis/Cost
     'SCScore', 'Tox21_Score', 'Biodegradable',
     'MolPrice', 'MolPrice_Penalty',
-    'MP-Measured', 'BP-Measured', 'DC_exp', 'flashpoint'
+    # OOD
+    'OOD_any', 'OOD_count',
 ]
 
 
@@ -457,9 +438,9 @@ def compute_generation_stats(top_n_df, generation):
     # Properties to compute stats for
     stat_properties = [
         'FitnessScore', 'NichedFitnessScore', 'AvgTanimotoSimilarity',
-        'alpha_avg', 'beta_avg', 'FOM1_avg', 'FOM1_direct_avg', 'Ra_avg',
-        'Thermal_Conductivity_40C', 'Kinematic_Viscosity_40C',
-        'SCScore', 'Tox21_Score', 'MP-Measured'
+        'alpha_40', 'beta_40C', 'fom1_40C', 'FOM1_40',
+        'tc_40C', 'viscosity_40C',
+        'SCScore', 'Tox21_Score', 'mp', 'OOD_count'
     ]
     
     for prop in stat_properties:
@@ -507,13 +488,11 @@ def main():
     # ----- Load Models -----
     print("\nLoading models...")
     
-    # Regression models (thermophysical properties)
+    # Regression models (all use Mordred-pipeline format)
     thermo_targets = [
-        "BP-Measured", "DC_exp", "Density_100C_g_cm^3", "Density_40C_g_cm^3",
-        "flashpoint", "Heat_Capacity_Constant_Pressure_100C_J_K_Mol",
-        "Heat_Capacity_Constant_Pressure_40C_J_K_Mol",
-        "Kinematic_Viscosity_40C", "Kinematic_Viscosity_100C",
-        "MP-Measured", "Thermal_Conductivity_100C", "Thermal_Conductivity_40C"
+        "bp", "mp", "fp", "dc",
+        "density_40C", "viscosity_40C", "tc_40C", "cpsat_40C", "beta_40C",
+        "fom1_40C",
     ]
     thermo_models = load_regression_models_with_aux(thermo_targets, MODEL_DIR)
 
@@ -526,7 +505,7 @@ def main():
     tox21_models = load_tox21_predictor(tox21_dir)
 
     # Biodegradability model (classification)
-    biodeg_dir = os.path.join(MODEL_DIR, "biodegradability")
+    biodeg_dir = os.path.join(MODEL_DIR, "biodeg")
     biodeg_model = load_biodeg_model(biodeg_dir)
 
     # MolPrice model (cost prediction) — always loaded for logging,
@@ -541,17 +520,20 @@ def main():
     else:
         print(f"WARNING: MolPrice model not found at {_mp_path} — MolPrice column will be empty")
 
-    # FOM1 direct prediction models (XGBoost+Descriptor ensemble)
-    fom1_direct_models = None
-    if TARGET in ("FOM1_direct", "FOM1_direct_40", "FOM1_direct_100"):
-        print("\nLoading FOM1 direct prediction models...")
-        fom1_direct_models = load_fom1_direct_models(args.fom1_model_dir)
+    # Mahalanobis OOD params (precomputed per model at startup)
+    print("\nPrecomputing Mahalanobis OOD parameters...")
+    mahal_params = {}
+    training_data_dir = args.training_data_dir
+    for target, data in thermo_models.items():
+        params = compute_mahalanobis_params(
+            target, data['features'], training_data_dir)
+        if params is not None:
+            mahal_params[target] = params
+    if mahal_params:
+        print(f"Mahalanobis ready for {len(mahal_params)} models")
     else:
-        # Still load them if directory exists, so predictions are always available
-        try:
-            fom1_direct_models = load_fom1_direct_models(args.fom1_model_dir)
-        except FileNotFoundError:
-            print("FOM1 direct models not found - FOM1_direct columns will not be computed")
+        print("Mahalanobis: no params computed (training data not found)")
+        mahal_params = None
 
     print("Models loaded successfully.\n")
 
@@ -599,8 +581,8 @@ def main():
         sc_model=sc_model,
         tox21_models=tox21_models,
         biodeg_model=biodeg_model,
-        fom1_direct_models=fom1_direct_models,
-        molprice_model=molprice_model
+        molprice_model=molprice_model,
+        mahal_params=mahal_params
     )
 
     evaluated_df = assign_validity(
@@ -750,8 +732,8 @@ def main():
             sc_model=sc_model,
             tox21_models=tox21_models,
             biodeg_model=biodeg_model,
-            fom1_direct_models=fom1_direct_models,
-            molprice_model=molprice_model
+            molprice_model=molprice_model,
+            mahal_params=mahal_params
         )
 
         evaluated_offspring_df = assign_validity(
@@ -831,14 +813,13 @@ def main():
         print(f"  Valid:               {valid_count}/{TOP_N}")
         print(f"  Elite diversity:     {unique_in_elite} unique, avg_sim={mean_similarity:.4f}")
         
-        if 'FOM1_avg' in top_n_df.columns:
-            print(f"  Best FOM1:           {top_n_df['FOM1_avg'].max():.4f}")
-            print(f"  Mean FOM1:           {top_n_df['FOM1_avg'].mean():.4f}")
-        if 'FOM1_direct_avg' in top_n_df.columns:
-            print(f"  Best FOM1 (direct):  {top_n_df['FOM1_direct_avg'].max():.4f}")
-            print(f"  Mean FOM1 (direct):  {top_n_df['FOM1_direct_avg'].mean():.4f}")
-        if 'alpha_avg' in top_n_df.columns:
-            print(f"  Mean alpha:          {top_n_df['alpha_avg'].mean():.6f}")
+        if 'fom1_40C' in top_n_df.columns:
+            print(f"  Best FOM1 (direct):  {top_n_df['fom1_40C'].max():.4f}")
+            print(f"  Mean FOM1 (direct):  {top_n_df['fom1_40C'].mean():.4f}")
+        if 'FOM1_40' in top_n_df.columns:
+            print(f"  Best FOM1 (comp):    {top_n_df['FOM1_40'].max():.4f}")
+        if 'OOD_count' in top_n_df.columns:
+            print(f"  Mean OOD count:      {top_n_df['OOD_count'].mean():.1f}")
 
         # =============================
         # Stagnation Detection & Response
@@ -902,8 +883,8 @@ def main():
                             sc_model=sc_model,
                             tox21_models=tox21_models,
                             biodeg_model=biodeg_model,
-                            fom1_direct_models=fom1_direct_models,
-                            molprice_model=molprice_model
+                            molprice_model=molprice_model,
+                            mahal_params=mahal_params
                         )
                         fresh_evaluated = assign_validity(
                             fresh_evaluated,

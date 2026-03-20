@@ -14,61 +14,79 @@ import joblib
 import time
 
 from mutations import mutate
-from descriptors import descriptor_funcs, descriptor_names, calc_descriptors
+from descriptors import (
+    descriptor_funcs, descriptor_names, calc_descriptors,
+    mordred_descriptor_names, rdkit_prefixed_names, calc_mordred_descriptors,
+)
 from evaluation import get_scscore_cached, strict_canonicalize_smiles
 
+from sklearn.covariance import LedoitWolf
+from sklearn.preprocessing import StandardScaler
 
-def is_biodegradable(smiles, biodeg_model):
+
+def is_biodegradable(smiles, biodeg_model, desc_row=None):
     """
     Predict biodegradability using the trained classification model.
-    
-    Works with both old-style pickle models (dict with 'model' and 'features')
-    and new joblib models from the hybrid training script.
+
+    Supports Mordred-pipeline models (dict with 'selected_features') and
+    legacy models. When desc_row (a Series with all descriptors) is provided,
+    avoids recomputing descriptors.
     """
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        return False
-
-    try:
-        desc_values = [func(mol) for func in descriptor_funcs]
-    except Exception:
-        return False
-
-    if any(pd.isna(desc_values)) or any(val is None for val in desc_values):
-        return False
-
-    base_features = pd.DataFrame([desc_values], columns=descriptor_names)
-
-    # Check if model has specific features (new style from hybrid training)
-    if hasattr(biodeg_model, 'get') and callable(biodeg_model.get):
-        # It's a dict from joblib (new style)
-        model = biodeg_model['model']
-        features = biodeg_model.get('features', descriptor_names)
-        
-        # Select only the features the model was trained on
+    if not isinstance(biodeg_model, dict) or 'selected_features' not in biodeg_model:
+        # Legacy path (old-style models)
+        mol = Chem.MolFromSmiles(smiles) if isinstance(smiles, str) else None
+        if mol is None:
+            return False
+        try:
+            desc_values = [func(mol) for func in descriptor_funcs]
+        except Exception:
+            return False
+        base_features = pd.DataFrame([desc_values], columns=descriptor_names)
+        model = biodeg_model['model'] if isinstance(biodeg_model, dict) else biodeg_model
+        features = biodeg_model.get('features', descriptor_names) if isinstance(biodeg_model, dict) else descriptor_names
         try:
             X = base_features[features]
         except KeyError:
-            # Fall back to all features if some are missing
             X = base_features
-    else:
-        # Old style - model is the classifier directly
-        model = biodeg_model
-        
-        # Add interaction terms for old-style models
-        if 'MolWt' in base_features.columns and 'MolLogP' in base_features.columns:
-            base_features["MolWt_x_MolLogP"] = base_features["MolWt"] * base_features["MolLogP"]
-        if 'TPSA' in base_features.columns and 'NumRotatableBonds' in base_features.columns:
-            base_features["TPSA_x_NumRotatableBonds"] = base_features["TPSA"] * base_features["NumRotatableBonds"]
-        if 'MolLogP' in base_features.columns and 'RingCount' in base_features.columns:
-            base_features["MolLogP_x_RingCount"] = base_features["MolLogP"] * base_features["RingCount"]
-        X = base_features
+        try:
+            return model.predict(X)[0] == 1
+        except Exception:
+            return False
 
+    # Mordred-pipeline path
+    model = biodeg_model['model']
+    features = biodeg_model['selected_features']
+
+    if desc_row is not None:
+        try:
+            X = pd.DataFrame([desc_row[features].values], columns=features)
+        except KeyError:
+            return False
+    else:
+        # Compute descriptors from scratch
+        mol = Chem.MolFromSmiles(smiles) if isinstance(smiles, str) else None
+        if mol is None:
+            return False
+        try:
+            rdkit_vals = calc_descriptors(mol, descriptor_funcs)
+            mordred_vals = calc_mordred_descriptors(mol)
+        except Exception:
+            return False
+        all_names = (
+            [f"rdkit_{n}" for n in descriptor_names] +
+            mordred_descriptor_names
+        )
+        all_vals = rdkit_vals + mordred_vals
+        row = pd.Series(all_vals, index=all_names)
+        try:
+            X = pd.DataFrame([row[features].values], columns=features)
+        except KeyError:
+            return False
+
+    X = X.apply(pd.to_numeric, errors='coerce').fillna(0)
     try:
-        prediction = model.predict(X)[0]
-        return prediction == 1
-    except Exception as e:
-        print("Biodeg prediction error:", e)
+        return model.predict(X)[0] == 1
+    except Exception:
         return False
 
 
@@ -250,35 +268,38 @@ def apply_mutations_to_population(
     return out_df, seen_smiles
 
 
-def evaluate_molecules(df, thermo_models, sc_model, tox21_models, biodeg_model, drop_descriptors=True, fom1_direct_models=None, molprice_model=None):
+def evaluate_molecules(df, thermo_models, sc_model, tox21_models, biodeg_model,
+                       drop_descriptors=True, molprice_model=None,
+                       mahal_params=None):
     """
-    Evaluate molecules by predicting all thermophysical properties.
-    
-    Handles model dependencies - e.g., Density_100C may depend on Density_40C prediction.
-    Models are separated into independent (no auxiliary features) and dependent (uses 
-    predictions from other models as input features).
+    Evaluate molecules: predict all properties using Mordred-pipeline models.
+
+    All models use mordred_*/rdkit_* prefixed features.  40C only — no 100C,
+    no Pr/Gr/Ra/Nu, no averaging.  Includes on-the-fly Mahalanobis OOD detection
+    when mahal_params is provided.
     """
-    # Remove rows with missing SMILES
     df = df[df['SMILES'].notna()].copy()
 
-    # Convert to RDKit Mol objects safely
     df['Mol'] = df['SMILES'].apply(lambda smi: Chem.MolFromSmiles(smi) if smi else None)
     df = df[df['Mol'].notna()].reset_index(drop=True)
 
     # ----------------------------
-    # Compute descriptors
+    # Compute descriptors (RDKit unprefixed + Mordred + rdkit-prefixed)
     # ----------------------------
-    desc_data = [calc_descriptors(mol, descriptor_funcs) for mol in df['Mol']]
-    desc_df = pd.DataFrame(desc_data, columns=descriptor_names)
-    
-    # CRITICAL: Convert all descriptor columns to numeric, coercing errors to NaN
-    for col in desc_df.columns:
-        desc_df[col] = pd.to_numeric(desc_df[col], errors='coerce')
-    
-    # Fill NaN with 0 (or could use column medians)
-    desc_df = desc_df.fillna(0)
-    
-    df = pd.concat([df[['SMILES', 'Mol']], desc_df], axis=1)
+    rdkit_data = [calc_descriptors(mol, descriptor_funcs) for mol in df['Mol']]
+    rdkit_df = pd.DataFrame(rdkit_data, columns=descriptor_names)
+
+    mordred_data = [calc_mordred_descriptors(mol) for mol in df['Mol']]
+    mordred_df = pd.DataFrame(mordred_data, columns=mordred_descriptor_names)
+
+    rdkit_prefixed_df = rdkit_df.copy()
+    rdkit_prefixed_df.columns = rdkit_prefixed_names
+
+    df = pd.concat([df[['SMILES', 'Mol']], rdkit_df, mordred_df, rdkit_prefixed_df], axis=1).copy()
+
+    # Numeric coercion + NaN fill (vectorised)
+    all_desc_cols = list(rdkit_df.columns) + list(mordred_df.columns) + list(rdkit_prefixed_df.columns)
+    df[all_desc_cols] = df[all_desc_cols].apply(pd.to_numeric, errors='coerce').fillna(0)
 
     # ----------------------------
     # Predict SCScore
@@ -297,157 +318,61 @@ def evaluate_molecules(df, thermo_models, sc_model, tox21_models, biodeg_model, 
     df["Tox21_Score"] = predict_tox21_batch(df, tox21_models)
 
     # ----------------------------
-    # Predict Thermo properties (with dependency handling)
+    # Predict thermophysical properties (all independent, no aux features)
     # ----------------------------
-    # Separate models into those with and without auxiliary features
-    independent_models = {}
-    dependent_models = {}
-    
     for target, data in thermo_models.items():
-        aux_feature = data.get('auxiliary_feature')
-        aux_feature_name = data.get('auxiliary_feature_name')
-        if aux_feature and aux_feature_name:
-            dependent_models[target] = data
-        else:
-            independent_models[target] = data
-    
-    # First pass: predict all independent models
-    for target, data in independent_models.items():
         model = data['model']
         features = data['features']
-        log_target = data.get('log_target', False)
+        log_transform = data.get('log_transform', False)
         try:
             X = df[features].copy()
             y_pred = model.predict(X)
-            if log_target:
+            if log_transform:
                 y_pred = np.expm1(y_pred)
             df[target] = y_pred
         except Exception as e:
             print(f"Skipping {target}, error: {e}")
             df[target] = np.nan
-    
-    # Second pass: predict dependent models (these use predictions from first pass)
-    for target, data in dependent_models.items():
-        model = data['model']
-        features = data['features']
-        log_target = data.get('log_target', False)
-        aux_feature = data['auxiliary_feature']  # e.g., "Density_40C_g_cm^3"
-        aux_feature_name = data['auxiliary_feature_name']  # e.g., "AUX_Density_40C_g_cm^3"
-        
-        try:
-            # Build feature matrix
-            # Some features come from descriptors, one comes from a previous prediction
-            X = pd.DataFrame(index=df.index)
-            
-            for feat in features:
-                if feat == aux_feature_name:
-                    # This feature comes from a previous prediction
-                    if aux_feature not in df.columns:
-                        raise ValueError(f"Auxiliary feature {aux_feature} not yet predicted. "
-                                         f"Ensure {aux_feature} is predicted before {target}.")
-                    X[feat] = df[aux_feature].values
-                else:
-                    # Regular descriptor feature
-                    X[feat] = df[feat].values
-            
-            y_pred = model.predict(X)
-            if log_target:
-                y_pred = np.expm1(y_pred)
-            df[target] = y_pred
-            
-        except Exception as e:
-            print(f"Skipping {target}, error: {e}")
-            df[target] = np.nan
 
     # ----------------------------
-    # Predict biodegradability
+    # Predict biodegradability (using precomputed descriptor row)
     # ----------------------------
-    df["Biodegradable"] = df["SMILES"].apply(lambda smi: is_biodegradable(smi, biodeg_model))
+    biodeg_preds = []
+    for i, row in df.iterrows():
+        biodeg_preds.append(is_biodegradable(row['SMILES'], biodeg_model, desc_row=row))
+    df["Biodegradable"] = biodeg_preds
 
     # ----------------------------
-    # Compute thermal properties (alpha, beta, Ra, h, FOM1)
+    # Compute derived thermal properties (40C only)
     # ----------------------------
-    g = 9.81
-    dT = 60  # 40→100°C
-
     df["MW"] = df["Mol"].apply(lambda mol: Descriptors.MolWt(mol))
 
-    df["Cp_40"] = df["Heat_Capacity_Constant_Pressure_40C_J_K_Mol"] / df["MW"] * 1000
-    df["Cp_100"] = df["Heat_Capacity_Constant_Pressure_100C_J_K_Mol"] / df["MW"] * 1000
-
-    df["alpha_40"] = df["Thermal_Conductivity_40C"] / (df["Density_40C_g_cm^3"] * 1000 * df["Cp_40"])
-    df["alpha_100"] = df["Thermal_Conductivity_100C"] / (df["Density_100C_g_cm^3"] * 1000 * df["Cp_100"])
-
-    df["nu_40"] = df["Kinematic_Viscosity_40C"] * 1e-6
-    df["nu_100"] = df["Kinematic_Viscosity_100C"] * 1e-6
-
-    df["beta_40"] = -(1 / df["Density_40C_g_cm^3"]) * ((df["Density_100C_g_cm^3"] - df["Density_40C_g_cm^3"]) / dT)
-    df["beta_100"] = -(1 / df["Density_100C_g_cm^3"]) * ((df["Density_100C_g_cm^3"] - df["Density_40C_g_cm^3"]) / dT)
-
-    df["Ra_40"] = g * df["beta_40"] / (df["nu_40"] * df["alpha_40"])
-    df["Ra_100"] = g * df["beta_100"] / (df["nu_100"] * df["alpha_100"])
-
-    n_exp = 1/3
-    df["h_40"] = df["Thermal_Conductivity_40C"] * np.power(df["Ra_40"].clip(lower=0), n_exp)
-    df["h_100"] = df["Thermal_Conductivity_100C"] * np.power(df["Ra_100"].clip(lower=0), n_exp)
-
-    df["FOM1_40"] = df["Thermal_Conductivity_40C"] * ((df["beta_40"] * df["Cp_40"] * df["Density_40C_g_cm^3"] * 1000) / (df["nu_40"] * df["Thermal_Conductivity_40C"]))**0.2813
-    df["FOM1_100"] = df["Thermal_Conductivity_100C"] * ((df["beta_100"] * df["Cp_100"] * df["Density_100C_g_cm^3"] * 1000) / (df["nu_100"] * df["Thermal_Conductivity_100C"]))**0.2813
-
-    # Prandtl number: Pr = nu / alpha = (mu * Cp) / k
-    df["Pr_40"] = df["nu_40"] / df["alpha_40"]
-    df["Pr_100"] = df["nu_100"] / df["alpha_100"]
-
-    # Grashof number: Gr = g * beta * dT * L^3 / nu^2
-    # Using L = 1 (characteristic length = 1m for dimensionless comparison)
-    L = 1.0
-    df["Gr_40"] = g * df["beta_40"] * dT * (L**3) / (df["nu_40"]**2)
-    df["Gr_100"] = g * df["beta_100"] * dT * (L**3) / (df["nu_100"]**2)
-
-    # Nusselt number: Nu = h * L / k (using h from natural convection correlation)
-    # For natural convection: Nu ~ Ra^(1/3), so Nu = (Ra)^(1/3)
-    df["Nu_40"] = np.power(df["Ra_40"].clip(lower=0), n_exp)
-    df["Nu_100"] = np.power(df["Ra_100"].clip(lower=0), n_exp)
-
-    # Compute averages
-    df["alpha_avg"] = (df["alpha_40"] + df["alpha_100"]) / 2
-    df["beta_avg"] = (df["beta_40"] + df["beta_100"]) / 2
-    df["Ra_avg"] = (df["Ra_40"] + df["Ra_100"]) / 2
-    df["h_avg"] = (df["h_40"] + df["h_100"]) / 2
-    df["FOM1_avg"] = (df["FOM1_40"] + df["FOM1_100"]) / 2
-    df["Pr_avg"] = (df["Pr_40"] + df["Pr_100"]) / 2
-    df["Gr_avg"] = (df["Gr_40"] + df["Gr_100"]) / 2
-    df["Nu_avg"] = (df["Nu_40"] + df["Nu_100"]) / 2
+    df["Cp_40"] = df["cpsat_40C"] / df["MW"] * 1000
+    df["alpha_40"] = df["tc_40C"] / (df["density_40C"] * 1000 * df["Cp_40"])
+    df["nu_40"] = df["viscosity_40C"] * 1e-6
+    df["FOM1_40"] = df["tc_40C"] * (
+        (df["beta_40C"] * df["Cp_40"] * df["density_40C"] * 1000)
+        / (df["nu_40"] * df["tc_40C"])
+    ) ** 0.2813
 
     # ----------------------------
-    # Predict FOM1 directly (XGBoost+Descriptor ensemble)
+    # Mahalanobis OOD detection (per model)
     # ----------------------------
-    if fom1_direct_models is not None:
-        for temp_key, col_name in [('fom1_40', 'FOM1_40C_direct'), ('fom1_100', 'FOM1_100C_direct')]:
-            if temp_key not in fom1_direct_models:
-                continue
-            mdata = fom1_direct_models[temp_key]
-            desc_cols = mdata['descriptor_columns']
-
-            # Build feature matrix from the descriptors already in df
-            X_raw = df[desc_cols].copy()
-            X_raw = X_raw.apply(pd.to_numeric, errors='coerce').fillna(0)
-            X_raw = X_raw.replace([np.inf, -np.inf], 0)
-
-            # Ensemble prediction: average across 5 folds (each with its own scaler)
-            preds_all = []
-            for model, scaler in zip(mdata['models'], mdata['scalers']):
-                X_scaled = scaler.transform(X_raw.values)
-                preds_all.append(model.predict(X_scaled))
-            df[col_name] = np.mean(preds_all, axis=0)
-
-        df["FOM1_direct_avg"] = (df["FOM1_40C_direct"] + df["FOM1_100C_direct"]) / 2
+    if mahal_params is not None:
+        for model_name, params in mahal_params.items():
+            compute_mahalanobis_batch(df, params, model_name)
+        # Summary columns
+        ood_cols = [c for c in df.columns if c.startswith('OOD_')]
+        if ood_cols:
+            df['OOD_any'] = df[ood_cols].max(axis=1)
+            df['OOD_count'] = (df[ood_cols] > 0).sum(axis=1)
 
     # ----------------------------
     # Drop descriptors/Mol if requested
     # ----------------------------
     if drop_descriptors:
-        df = df.drop(columns=descriptor_names + ['Mol'], errors='ignore')
+        drop_cols = list(descriptor_names) + list(mordred_descriptor_names) + list(rdkit_prefixed_names) + ['Mol']
+        df = df.drop(columns=[c for c in drop_cols if c in df.columns], errors='ignore')
 
     return df
 
@@ -728,14 +653,14 @@ def assign_validity(
     has_radical = df["SMILES"].apply(_has_radicals)
 
     # Check for negative beta (physically impossible - would mean density increases with temp)
-    negative_beta = (df["beta_40"] < 0) | (df["beta_100"] < 0)
+    negative_beta = (df["beta_40C"] < 0) if "beta_40C" in df.columns else pd.Series(False, index=df.index)
 
     conditions = (
         (df["SCScore"] <= sc_threshold) &
-        (df["MP-Measured"] <= mp_max) &
-        (df["BP-Measured"] >= bp_min) &
-        (df["DC_exp"] <= dc_max) &
-        (df["flashpoint"] >= min_fp) &
+        (df["mp"] <= mp_max) &
+        (df["bp"] >= bp_min) &
+        (df["dc"] <= dc_max) &
+        (df["fp"] >= min_fp) &
         ((not use_biodeg) | (df["Biodegradable"] == True)) &
         (df["Tox21_Score"] <= max_tox21) &
         (~invalid_fragment) &
@@ -867,28 +792,36 @@ def load_tox21_predictor(model_path):
 def load_biodeg_model(model_dir):
     """
     Load biodegradability model from directory.
-    
-    Supports two structures:
-    1. Old style: model_dir/biodegradability_model.pkl
-    2. New style: model_dir/Activity/model/xgb_model.joblib
+
+    Supports three structures (tried in order):
+    1. Mordred pipeline: model_dir/model/xgb_model.joblib (has 'selected_features')
+    2. Old joblib: model_dir/Activity/model/xgb_model.joblib
+    3. Old pickle: model_dir/biodegradability_model.pkl
     """
-    # Try old style first
-    old_path = os.path.join(model_dir, "biodegradability_model.pkl")
-    if os.path.exists(old_path):
-        with open(old_path, "rb") as f:
+    # Mordred pipeline (new standard)
+    mordred_path = os.path.join(model_dir, "model", "xgb_model.joblib")
+    if os.path.exists(mordred_path):
+        model_data = joblib.load(mordred_path)
+        n_feat = len(model_data.get('selected_features', []))
+        print(f"Loaded biodegradability model (Mordred pipeline): {mordred_path} ({n_feat} features)")
+        return model_data
+
+    # Old joblib
+    old_joblib = os.path.join(model_dir, "Activity", "model", "xgb_model.joblib")
+    if os.path.exists(old_joblib):
+        model_data = joblib.load(old_joblib)
+        print(f"Loaded biodegradability model (old joblib): {old_joblib}")
+        return model_data
+
+    # Old pickle
+    old_pkl = os.path.join(model_dir, "biodegradability_model.pkl")
+    if os.path.exists(old_pkl):
+        with open(old_pkl, "rb") as f:
             model = pickle.load(f)
-        print(f"Loaded biodegradability model (old style): {old_path}")
+        print(f"Loaded biodegradability model (old pickle): {old_pkl}")
         return model
-    
-    # Try new style
-    new_path = os.path.join(model_dir, "Activity", "model", "xgb_model.joblib")
-    if os.path.exists(new_path):
-        model_data = joblib.load(new_path)
-        print(f"Loaded biodegradability model (new style): {new_path}")
-        return model_data  # Return full dict so is_biodegradable can use features
-    
-    raise FileNotFoundError(f"Biodegradability model not found in {model_dir}. "
-                            f"Expected either {old_path} or {new_path}")
+
+    raise FileNotFoundError(f"Biodegradability model not found in {model_dir}")
 
 
 def predict_tox21_batch(df, tox21_predictor):
@@ -918,6 +851,170 @@ def predict_tox21_batch(df, tox21_predictor):
 # ============================================================
 # Regression Model Loading with Auxiliary Feature Support
 # ============================================================
+
+# ============================================================
+# On-the-Fly Mahalanobis OOD Detection
+# ============================================================
+
+def _drop_correlated_features(X, corr_threshold=0.95):
+    """Remove highly correlated features. Returns indices to keep."""
+    corr = np.corrcoef(X, rowvar=False)
+    n = corr.shape[0]
+    drop = set()
+    while True:
+        counts = np.zeros(n, dtype=int)
+        for i in range(n):
+            if i in drop:
+                continue
+            for j in range(i + 1, n):
+                if j in drop:
+                    continue
+                if abs(corr[i, j]) > corr_threshold:
+                    counts[i] += 1
+                    counts[j] += 1
+        active = {i: counts[i] for i in range(n) if i not in drop and counts[i] > 0}
+        if not active:
+            break
+        drop.add(max(active, key=active.get))
+    return sorted(set(range(n)) - drop)
+
+
+def compute_mahalanobis_params(model_name, model_features, data_dir,
+                                threshold_pct=0.975, corr_threshold=0.95):
+    """
+    Precompute Mahalanobis parameters for one property model.
+
+    Uses Ledoit-Wolf shrinkage covariance in decorrelated descriptor space.
+    OOD threshold is the 97.5th percentile of training D_M^2.
+
+    Supports both Mordred-pipeline models (prefixed features, separate descriptor CSV)
+    and legacy models (unprefixed features, descriptors inline in training CSV).
+
+    Args:
+        model_name: Property name (e.g., 'density_40C', 'bp')
+        model_features: List of selected feature names
+        data_dir: Path to training/data directory
+        threshold_pct: Percentile for OOD threshold
+        corr_threshold: Correlation threshold for feature decorrelation
+
+    Returns:
+        dict with keys: features, scaler, keep_idx, location, precision,
+                        threshold_sq   (or None if data unavailable)
+    """
+    # Determine training data source
+    thermo_props = {'density_40C': 'density', 'viscosity_40C': 'viscosity',
+                    'tc_40C': 'tc', 'cpsat_40C': 'cpsat',
+                    'beta_40C': 'beta', 'fom1_40C': 'fom1'}
+    constraint_props = {'bp': 'BP-Measured', 'mp': 'MP-Measured',
+                        'fp': 'flashpoint', 'dc': 'DC_exp'}
+
+    # Detect if model uses prefixed features (Mordred pipeline) or unprefixed (legacy)
+    is_prefixed = any(f.startswith('mordred_') or f.startswith('rdkit_') for f in model_features[:5])
+
+    if model_name in thermo_props:
+        prop_key = thermo_props[model_name]
+        if is_prefixed:
+            # Mordred pipeline: descriptors in separate CSV, SMILES in property CSV
+            desc_csv = os.path.join(data_dir, 'nist_8100', 'descriptors_rdkit_mordred.csv')
+            smiles_csv = os.path.join(data_dir, 'nist_8100', f'{prop_key}_cho_cleaned.csv')
+        else:
+            # Legacy: descriptors inline in property CSV
+            desc_csv = os.path.join(data_dir, 'nist_8100', f'{prop_key}_cho_cleaned.csv')
+            smiles_csv = desc_csv  # same file
+    elif model_name in constraint_props:
+        prop_key = constraint_props[model_name]
+        if is_prefixed:
+            desc_csv = os.path.join(data_dir, 'constraints', 'descriptors_rdkit_mordred.csv')
+            smiles_csv = os.path.join(data_dir, 'constraints', f'{prop_key}_cleaned.csv')
+        else:
+            desc_csv = os.path.join(data_dir, 'constraints', f'{prop_key}_cleaned.csv')
+            smiles_csv = desc_csv
+    else:
+        print(f"  Mahalanobis: unknown model {model_name}, skipping")
+        return None
+
+    if not os.path.exists(desc_csv):
+        print(f"  Mahalanobis: missing data for {model_name} ({desc_csv})")
+        return None
+
+    if is_prefixed and desc_csv != smiles_csv:
+        # Mordred pipeline: filter descriptor CSV to training SMILES
+        if not os.path.exists(smiles_csv):
+            print(f"  Mahalanobis: missing SMILES data for {model_name}")
+            return None
+        smiles_df = pd.read_csv(smiles_csv, usecols=['SMILES'])
+        train_smiles = set(smiles_df['SMILES'].dropna().unique())
+        desc_df = pd.read_csv(desc_csv)
+        desc_df = desc_df[desc_df['SMILES'].isin(train_smiles)].copy()
+    else:
+        # Legacy: descriptors are in the training CSV itself
+        desc_df = pd.read_csv(desc_csv)
+
+    # Check feature availability
+    available = [f for f in model_features if f in desc_df.columns]
+    if len(available) < 2:
+        print(f"  Mahalanobis: too few features for {model_name} "
+              f"({len(available)}/{len(model_features)} available)")
+        return None
+
+    X_train = desc_df[available].values.astype(float)
+
+    # Drop rows with NaN
+    valid = ~np.isnan(X_train).any(axis=1)
+    X_train = X_train[valid]
+    n_train = X_train.shape[0]
+
+    if n_train < 10:
+        print(f"  Mahalanobis: too few training samples for {model_name} ({n_train})")
+        return None
+
+    # Standardise
+    scaler = StandardScaler().fit(X_train)
+    X_sc = scaler.transform(X_train)
+
+    # Decorrelate
+    keep_idx = _drop_correlated_features(X_sc, corr_threshold)
+    n_kept = len(keep_idx)
+    X_sc = X_sc[:, keep_idx]
+
+    # Ledoit-Wolf covariance
+    lw = LedoitWolf().fit(X_sc)
+
+    # Training threshold
+    diff = X_sc - lw.location_
+    train_mahal_sq = np.maximum(np.sum(diff @ lw.precision_ * diff, axis=1), 0)
+    threshold_sq = np.percentile(train_mahal_sq, 100 * threshold_pct)
+
+    print(f"  Mahalanobis {model_name}: {n_train} train, {len(available)} feat -> {n_kept} kept, "
+          f"p97.5={np.sqrt(threshold_sq):.1f}")
+
+    return {
+        'features': available,
+        'scaler': scaler,
+        'keep_idx': keep_idx,
+        'location': lw.location_,
+        'precision': lw.precision_,
+        'threshold_sq': threshold_sq,
+    }
+
+
+def compute_mahalanobis_batch(df, params, model_name):
+    """Compute Mahalanobis distance for a batch of molecules (in-place)."""
+    p = params
+    try:
+        X = df[p['features']].values.astype(float)
+    except KeyError:
+        df[f'Mahal_{model_name}'] = np.nan
+        df[f'OOD_{model_name}'] = 1
+        return
+
+    X = np.nan_to_num(X)
+    X_sc = p['scaler'].transform(X)[:, p['keep_idx']]
+    diff = X_sc - p['location']
+    mahal_sq = np.maximum(np.sum(diff @ p['precision'] * diff, axis=1), 0)
+    df[f'Mahal_{model_name}'] = np.sqrt(mahal_sq)
+    df[f'OOD_{model_name}'] = (mahal_sq > p['threshold_sq']).astype(int)
+
 
 def load_fom1_direct_models(fom1_model_dir):
     """
@@ -1024,52 +1121,51 @@ def load_fom1_direct_models(fom1_model_dir):
 
 def load_regression_models_with_aux(targets, model_dir):
     """
-    Load regression models with support for auxiliary features.
-    
-    This function loads models that may depend on predictions from other models.
-    For example, Density_100C may use Density_40C as an input feature.
-    
-    The model metadata should contain:
-    - 'model': the trained model
-    - 'features': list of feature names
-    - 'log_target': whether the target was log-transformed
-    - 'auxiliary_feature': the original target name used as auxiliary (e.g., 'Density_40C_g_cm^3')
-    - 'auxiliary_feature_name': the feature name in the model (e.g., 'AUX_Density_40C_g_cm^3')
-    
-    Returns:
-        dict: Dictionary mapping target names to model data dictionaries
+    Load regression models (Mordred-pipeline format).
+
+    Each model joblib contains:
+    - 'model': trained XGBRegressor/Classifier
+    - 'selected_features': list of mordred_*/rdkit_* feature names
+    - 'log_transform': bool (target was log1p-transformed)
+    - 'property': str
+    - 'best_params': dict
+
+    Also supports legacy format ('features', 'log_target') for backward compat.
     """
     models = {}
-    
+
     for target in targets:
         model_path = os.path.join(model_dir, target, "model", "xgb_model.joblib")
-        
+
         if not os.path.exists(model_path):
             print(f"Warning: Model not found for {target} at {model_path}")
             continue
-        
+
         try:
             model_data = joblib.load(model_path)
-            
-            # Extract model components
+
+            # Auto-detect format
+            if 'selected_features' in model_data:
+                features = model_data['selected_features']
+                log_transform = model_data.get('log_transform', False)
+            elif 'features' in model_data:
+                features = model_data['features']
+                log_transform = model_data.get('log_target', False)
+            else:
+                print(f"Warning: No feature list found for {target}")
+                continue
+
             models[target] = {
                 'model': model_data['model'],
-                'features': model_data['features'],
-                'log_target': model_data.get('log_target', False),
-                'auxiliary_feature': model_data.get('auxiliary_feature'),
-                'auxiliary_feature_name': model_data.get('auxiliary_feature_name')
+                'features': features,
+                'log_transform': log_transform,
             }
-            
-            # Log if auxiliary feature is present
-            if model_data.get('auxiliary_feature'):
-                print(f"  Loaded {target} (uses auxiliary: {model_data['auxiliary_feature']})")
-            else:
-                print(f"  Loaded {target}")
-                
+            print(f"  Loaded {target} ({len(features)} features, log={log_transform})")
+
         except Exception as e:
             print(f"Error loading model for {target}: {e}")
             continue
-    
+
     return models
 
 
