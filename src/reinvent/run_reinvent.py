@@ -1,0 +1,356 @@
+"""REINVENT entry point for de novo cooling fluid design.
+
+Matches the wsga.py interface so the same PBS sweep scripts can drive both
+methods.  Output CSVs are format-compatible with the WSGA analysis pipeline.
+
+Usage (from src/):
+    python reinvent/run_reinvent.py --target FOM1 --output_dir ../outputs/reinvent_test
+
+Or from repo root:
+    python src/reinvent/run_reinvent.py --target FOM1 --output_dir outputs/reinvent_test
+"""
+
+import os
+
+# Prevent OMP/MKL segfault when PyTorch + XGBoost coexist
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ["OMP_NUM_THREADS"] = "1"
+
+import argparse
+import copy
+import sys
+import time
+
+import numpy as np
+import pandas as pd
+import torch
+from rdkit import Chem, RDLogger
+
+# Ensure src/ is importable
+_src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
+from reinvent.vocabulary import SMILESVocabulary
+from reinvent.model import GRUModel
+from reinvent.reward import CoolingFluidReward, load_nist8100_corpus
+from reinvent.trainer import pretrain, ReinventTrainer
+
+RDLogger.DisableLog("rdApp.*")
+
+
+# ─────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────
+
+def setup_logging(output_dir):
+    """Redirect stdout/stderr to log file (matches wsga.py behaviour)."""
+    jobid_raw = os.environ.get("PBS_JOBID", "local")
+    jobid = jobid_raw.split(".")[0].split("[")[0]
+    array_idx = os.environ.get("PBS_ARRAY_INDEX", "0")
+
+    logs_dir = os.path.join(_src_dir, "logs", f"reinvent_{jobid}")
+    os.makedirs(logs_dir, exist_ok=True)
+    log_path = os.path.join(logs_dir, f"reinvent_{array_idx}.log")
+    log_file = open(log_path, "a", buffering=1)
+    sys.stdout = log_file
+    sys.stderr = log_file
+    print(f"Logging to: {log_path}")
+    return log_file
+
+
+# ─────────────────────────────────────────────
+# Output helpers
+# ─────────────────────────────────────────────
+
+# Properties tracked per generation (subset of WSGA TRACKED_PROPERTIES)
+TRACKED_PROPERTIES = [
+    "FitnessScore", "is_valid",
+    "density_40C", "viscosity_40C", "tc_40C", "cpsat_40C", "beta_40C",
+    "fom1_40C",
+    "MW", "Cp_40", "alpha_40", "nu_40", "FOM1_40",
+    "bp", "mp", "fp", "dc",
+    "SCScore", "Tox21_Score", "Biodegradable",
+    "MolPrice", "MolPrice_Penalty",
+    "OOD_any", "OOD_count",
+]
+
+
+def get_top_n(trainer, n=40):
+    """Return top-N molecules by FitnessScore from the evaluation cache."""
+    items = [
+        (csmi, data["FitnessScore"], data["row"])
+        for csmi, data in trainer.eval_cache.items()
+        if data["FitnessScore"] > 0
+    ]
+    items.sort(key=lambda x: x[1], reverse=True)
+    items = items[:n]
+
+    rows = []
+    for rank, (csmi, fitness, row_dict) in enumerate(items, start=1):
+        rec = {"SMILES": csmi, "rank": rank}
+        for prop in TRACKED_PROPERTIES:
+            rec[prop] = row_dict.get(prop, np.nan) if row_dict else np.nan
+        # Ensure FitnessScore from cache overrides row (it includes penalty)
+        rec["FitnessScore"] = fitness
+        rows.append(rec)
+    return pd.DataFrame(rows)
+
+
+def compute_generation_stats(top_n_df, step):
+    """Compute summary statistics for top-N molecules at a given step."""
+    stats = {"generation": step}
+
+    stat_props = [
+        "FitnessScore", "fom1_40C", "FOM1_40",
+        "tc_40C", "viscosity_40C",
+        "SCScore", "Tox21_Score", "mp", "OOD_count",
+    ]
+    for prop in stat_props:
+        if prop in top_n_df.columns:
+            vals = top_n_df[prop].dropna()
+            if len(vals) > 0:
+                stats[f"{prop}_mean"] = vals.mean()
+                stats[f"{prop}_std"] = vals.std()
+                stats[f"{prop}_min"] = vals.min()
+                stats[f"{prop}_max"] = vals.max()
+
+    if "is_valid" in top_n_df.columns:
+        stats["n_valid"] = int(top_n_df["is_valid"].sum())
+        stats["pct_valid"] = 100 * top_n_df["is_valid"].mean()
+
+    return stats
+
+
+# ─────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="REINVENT for de novo cooling fluid design",
+    )
+
+    # --- Shared with wsga.py ---
+    parser.add_argument("--target", type=str, default="FOM1",
+                        choices=["alpha", "FOM1", "FOM1_40", "FOM1_direct"])
+    parser.add_argument("--output_dir", type=str, default="../outputs")
+    parser.add_argument("--model_dir", type=str, default="../models")
+    parser.add_argument("--training_data_dir", type=str,
+                        default="../training/data")
+    parser.add_argument("--top_n", type=int, default=40)
+
+    # Validity thresholds (same as wsga.py)
+    parser.add_argument("--mp_threshold", type=float, default=-30)
+    parser.add_argument("--bp_threshold", type=float, default=70)
+    parser.add_argument("--dc_threshold", type=float, default=8)
+    parser.add_argument("--fp_threshold", type=float, default=373)
+    parser.add_argument("--sc_threshold", type=float, default=3)
+    parser.add_argument("--tox_threshold", type=float, default=3)
+    parser.add_argument("--no_biodeg", action="store_true")
+    parser.add_argument("--stability_mode", type=str, default=None,
+                        choices=["strict"])
+    parser.add_argument("--molprice_soft", type=float, default=0.0)
+    parser.add_argument("--molprice_hard", type=float, default=0.0)
+
+    # --- REINVENT-specific ---
+    parser.add_argument("--pretrain_epochs", type=int, default=30)
+    parser.add_argument("--lr_pretrain", type=float, default=1e-3)
+    parser.add_argument("--rl_steps", type=int, default=5000,
+                        help="Maximum RL fine-tuning steps (safety cap)")
+    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--sigma", type=float, default=0.5,
+                        help="Reward scaling in augmented likelihood")
+    parser.add_argument("--lr_rl", type=float, default=5e-5)
+    parser.add_argument("--convergence_patience", type=int, default=200,
+                        help="Stop if best FOM1 doesn't improve for N steps")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--log_interval", type=int, default=10)
+
+    args = parser.parse_args()
+
+    # ─── Setup ─────────────────────────────────
+    os.makedirs(args.output_dir, exist_ok=True)
+    log_file = setup_logging(args.output_dir)
+
+    # Set seeds
+    import random
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+
+    device = torch.device("cpu")  # GRU is tiny; bottleneck is Mordred
+
+    # Output paths (match wsga.py names)
+    all_eval_path = os.path.join(args.output_dir, "all_evaluated_molecules.csv")
+    top_n_path = os.path.join(args.output_dir, "top_n_tracking.csv")
+    gen_stats_path = os.path.join(args.output_dir, "generation_stats.csv")
+
+    print("=" * 60)
+    print("REINVENT Configuration")
+    print("=" * 60)
+    for k, v in sorted(vars(args).items()):
+        print(f"  {k}: {v}")
+    print("=" * 60)
+
+    # ─── Load pre-training corpus ──────────────
+    corpus = load_nist8100_corpus(args.training_data_dir)
+    if len(corpus) == 0:
+        raise RuntimeError("No training SMILES found — check --training_data_dir")
+
+    # ─── Build vocabulary ──────────────────────
+    vocab = SMILESVocabulary().build(corpus)
+    vocab_path = os.path.join(args.output_dir, "vocabulary.json")
+    vocab.save(vocab_path)
+    print(f"Vocabulary: {len(vocab)} tokens, saved to {vocab_path}")
+
+    # ─── Create model ─────────────────────────
+    model = GRUModel(len(vocab), embed_dim=128, hidden_dim=512,
+                     num_layers=3).to(device)
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"GRU model: {n_params:,} parameters")
+
+    # ─── Phase 1: Pre-training ─────────────────
+    print("\n" + "=" * 60)
+    print(f"PHASE 1: Pre-training ({args.pretrain_epochs} epochs)")
+    print("=" * 60)
+
+    model = pretrain(
+        model, vocab, corpus,
+        epochs=args.pretrain_epochs,
+        batch_size=args.batch_size,
+        lr=args.lr_pretrain,
+        device=device,
+    )
+    torch.save(model.state_dict(), os.path.join(args.output_dir, "prior.pt"))
+
+    # ─── Create prior (frozen) + agent (trainable) ────
+    prior = copy.deepcopy(model)
+    prior.eval()
+    for p in prior.parameters():
+        p.requires_grad = False
+
+    agent = copy.deepcopy(model)
+
+    # ─── Build reward function ─────────────────
+    reward_fn = CoolingFluidReward(
+        model_dir=args.model_dir,
+        training_data_dir=args.training_data_dir,
+        target=args.target,
+        sc_threshold=args.sc_threshold,
+        mp_threshold=args.mp_threshold,
+        bp_threshold=args.bp_threshold,
+        dc_threshold=args.dc_threshold,
+        fp_threshold=args.fp_threshold,
+        tox_threshold=args.tox_threshold,
+        use_biodeg=not args.no_biodeg,
+        stability_mode=args.stability_mode,
+        molprice_soft=args.molprice_soft,
+        molprice_hard=args.molprice_hard,
+    )
+
+    # ─── Phase 2: REINVENT Fine-tuning ─────────
+    print("\n" + "=" * 60)
+    print(f"PHASE 2: REINVENT ({args.rl_steps} max steps, "
+          f"patience={args.convergence_patience})")
+    print("=" * 60)
+
+    trainer = ReinventTrainer(
+        prior=prior,
+        agent=agent,
+        vocab=vocab,
+        reward_fn=reward_fn,
+        sigma=args.sigma,
+        lr=args.lr_rl,
+        batch_size=args.batch_size,
+        max_len=80,
+        device=device,
+    )
+
+    tracking_data = []
+    generation_stats = []
+
+    for step in range(args.rl_steps):
+        metrics = trainer.step()
+
+        # --- Log progress ---
+        if step % args.log_interval == 0 or step == args.rl_steps - 1:
+            print(
+                f"Step {step:5d}: "
+                f"reward={metrics['reward_mean']:.2f} "
+                f"max={metrics['reward_max']:.2f} "
+                f"loss={metrics['loss']:.4f} "
+                f"valid={metrics['n_valid']}/{args.batch_size} "
+                f"new={metrics['n_new']} "
+                f"unique={metrics['n_unique_total']} "
+                f"best={metrics['best_fitness']:.2f} "
+                f"stag={metrics['steps_since_improvement']} "
+                f"({metrics['elapsed']:.1f}s)"
+            )
+
+        # --- Track top-N ---
+        top_n_df = get_top_n(trainer, n=args.top_n)
+        if len(top_n_df) > 0:
+            for _, row in top_n_df.iterrows():
+                record = {
+                    "generation": step,
+                    "rank": row.get("rank", 0),
+                    "SMILES": row["SMILES"],
+                }
+                for prop in TRACKED_PROPERTIES:
+                    record[prop] = row.get(prop, np.nan)
+                tracking_data.append(record)
+
+            generation_stats.append(compute_generation_stats(top_n_df, step))
+
+        # --- Periodic CSV save ---
+        if step % 50 == 0 and step > 0:
+            pd.DataFrame(tracking_data).to_csv(top_n_path, index=False)
+            pd.DataFrame(generation_stats).to_csv(gen_stats_path, index=False)
+
+        # --- Convergence check ---
+        if metrics["steps_since_improvement"] >= args.convergence_patience:
+            print(f"\nConverged: no improvement for "
+                  f"{args.convergence_patience} steps. Stopping.")
+            break
+
+    # ─── Save final results ────────────────────
+    print("\n" + "=" * 60)
+    print("Saving results...")
+    print("=" * 60)
+
+    # All evaluated molecules
+    all_eval_df = trainer.get_all_evaluated()
+    all_eval_df.to_csv(all_eval_path, index=False)
+    print(f"All evaluated molecules ({len(all_eval_df)}): {all_eval_path}")
+
+    # Top-N tracking
+    pd.DataFrame(tracking_data).to_csv(top_n_path, index=False)
+    print(f"Top-N tracking: {top_n_path}")
+
+    # Generation stats
+    pd.DataFrame(generation_stats).to_csv(gen_stats_path, index=False)
+    print(f"Generation stats: {gen_stats_path}")
+
+    # Agent weights
+    agent_path = os.path.join(args.output_dir, "agent.pt")
+    torch.save(agent.state_dict(), agent_path)
+
+    # Top-25 final molecules
+    top25 = get_top_n(trainer, n=25)
+    top25_path = os.path.join(
+        args.output_dir, f"top_25_molecules_{args.target}.csv")
+    top25.to_csv(top25_path, index=False)
+
+    print(f"\n{'=' * 60}")
+    print("REINVENT COMPLETE")
+    print(f"{'=' * 60}")
+    print(f"Best molecule: {trainer.best_smiles}")
+    print(f"Best FitnessScore: {trainer.best_fitness:.4f}")
+    print(f"Unique molecules evaluated: {trainer.n_unique_evaluated}")
+    print(f"RL steps completed: {step + 1}")
+    print(f"Output directory: {args.output_dir}")
+
+
+if __name__ == "__main__":
+    main()
