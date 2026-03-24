@@ -1,0 +1,11 @@
+LB Dielectric Constant Dataset Merge Report
+==================================================
+
+Existing CHNO dataset:  690 molecules
+LB total extracted:     860 records
+LB unique SMILES:       839
+LB new (not in existing): 212
+LB overlap:             627
+Final dataset:          902 molecules
+
+Growth: 690 -> 902 (1.31x)
