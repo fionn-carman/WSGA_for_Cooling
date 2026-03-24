@@ -167,6 +167,22 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--log_interval", type=int, default=10)
 
+    # --- Diversity mechanisms ---
+    parser.add_argument("--diversity_filter", action="store_true",
+                        default=True,
+                        help="Enable scaffold diversity filter (default: on)")
+    parser.add_argument("--no_diversity_filter", action="store_false",
+                        dest="diversity_filter",
+                        help="Disable scaffold diversity filter")
+    parser.add_argument("--max_per_scaffold", type=int, default=25,
+                        help="Max times a scaffold is rewarded before zeroing")
+    parser.add_argument("--replay_buffer_size", type=int, default=100,
+                        help="Experience replay buffer size (0 to disable)")
+    parser.add_argument("--replay_max_per_scaffold", type=int, default=10,
+                        help="Max molecules per scaffold in replay buffer")
+    parser.add_argument("--replay_fraction", type=float, default=0.5,
+                        help="Fraction of batch from replay buffer")
+
     args = parser.parse_args()
 
     # ─── Setup ─────────────────────────────────
@@ -265,6 +281,11 @@ def main():
         batch_size=args.batch_size,
         max_len=80,
         device=device,
+        diversity_filter=args.diversity_filter,
+        max_per_scaffold=args.max_per_scaffold,
+        replay_buffer_size=args.replay_buffer_size,
+        replay_max_per_scaffold=args.replay_max_per_scaffold,
+        replay_fraction=args.replay_fraction,
     )
 
     tracking_data = []
@@ -275,6 +296,15 @@ def main():
 
         # --- Log progress ---
         if step % args.log_interval == 0 or step == args.rl_steps - 1:
+            div_str = ""
+            if args.diversity_filter or args.replay_buffer_size > 0:
+                div_str = (
+                    f" filt={metrics['n_filtered']}"
+                    f" scaff={metrics['n_scaffolds']}"
+                    f"({metrics['n_saturated']}sat)"
+                    f" replay={metrics['n_replay']}"
+                    f"/{metrics['replay_size']}"
+                )
             print(
                 f"Step {step:5d}: "
                 f"reward={metrics['reward_mean']:.2f} "
@@ -284,7 +314,8 @@ def main():
                 f"new={metrics['n_new']} "
                 f"unique={metrics['n_unique_total']} "
                 f"best={metrics['best_fitness']:.2f} "
-                f"stag={metrics['steps_since_improvement']} "
+                f"stag={metrics['steps_since_improvement']}"
+                f"{div_str} "
                 f"({metrics['elapsed']:.1f}s)"
             )
 

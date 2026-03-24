@@ -12,12 +12,14 @@ to sample molecules whose log-probability under the augmented prior
 
 import copy
 import time
+from collections import defaultdict
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from rdkit import Chem
+from rdkit.Chem.Scaffolds import MurckoScaffold
 from torch.utils.data import DataLoader, Dataset
 
 from .vocabulary import SMILESVocabulary
@@ -151,6 +153,145 @@ def encode_batch(smiles_list, vocab, device="cpu"):
 
 
 # ─────────────────────────────────────────────
+# Scaffold Diversity Filter (REINVENT 2.0)
+# ─────────────────────────────────────────────
+
+class ScaffoldDiversityFilter:
+    """REINVENT 2.0 scaffold diversity filter (Blaschke et al. 2020).
+
+    Tracks scaffold counts across the entire run. Once a scaffold has been
+    rewarded max_per_scaffold times, subsequent molecules with that scaffold
+    get reward=0.
+    """
+
+    def __init__(self, max_per_scaffold=25):
+        self.max_per_scaffold = max_per_scaffold
+        self.scaffold_counts = defaultdict(int)
+
+    def _get_scaffold(self, smi):
+        try:
+            mol = Chem.MolFromSmiles(smi)
+            if mol is None:
+                return "unknown"
+            scaffold = MurckoScaffold.MakeScaffoldGeneric(
+                MurckoScaffold.GetScaffoldForMol(mol))
+            return Chem.MolToSmiles(scaffold)
+        except Exception:
+            return "unknown"
+
+    def filter_rewards(self, smiles_list, rewards):
+        """Zero out rewards for saturated scaffolds.
+
+        Args:
+            smiles_list: list of canonical SMILES (may contain None).
+            rewards: np.array of rewards.
+
+        Returns:
+            (filtered_rewards, n_filtered) — modified rewards array and count
+            of molecules whose reward was zeroed.
+        """
+        filtered = rewards.copy()
+        n_filtered = 0
+        for i, smi in enumerate(smiles_list):
+            if smi is None or filtered[i] <= 0:
+                continue
+            scaffold = self._get_scaffold(smi)
+            if self.scaffold_counts[scaffold] >= self.max_per_scaffold:
+                filtered[i] = 0.0
+                n_filtered += 1
+            else:
+                self.scaffold_counts[scaffold] += 1
+        return filtered, n_filtered
+
+    @property
+    def n_scaffolds(self):
+        return len(self.scaffold_counts)
+
+    @property
+    def n_saturated(self):
+        return sum(
+            1 for c in self.scaffold_counts.values()
+            if c >= self.max_per_scaffold
+        )
+
+
+# ─────────────────────────────────────────────
+# Experience Replay Buffer (Augmented Memory)
+# ─────────────────────────────────────────────
+
+class ReplayBuffer:
+    """Store top-performing molecules and replay during training.
+
+    Implements scaffold-aware diversity control (max_per_scaffold) to prevent
+    mode collapse into a single Murcko scaffold.
+    """
+
+    def __init__(self, max_size=100, max_per_scaffold=10):
+        self.buffer = {}  # SMILES -> {reward, step, scaffold}
+        self.max_size = max_size
+        self.max_per_scaffold = max_per_scaffold
+
+    def _get_scaffold(self, smi):
+        try:
+            mol = Chem.MolFromSmiles(smi)
+            if mol is None:
+                return "unknown"
+            scaffold = MurckoScaffold.MakeScaffoldGeneric(
+                MurckoScaffold.GetScaffoldForMol(mol))
+            return Chem.MolToSmiles(scaffold)
+        except Exception:
+            return "unknown"
+
+    def add(self, smiles, reward, step):
+        scaffold = self._get_scaffold(smiles)
+        self.buffer[smiles] = {
+            "reward": reward, "step": step, "scaffold": scaffold,
+        }
+        if len(self.buffer) > self.max_size:
+            self._evict_lowest()
+        self._scaffold_purge()
+
+    def _evict_lowest(self):
+        if not self.buffer:
+            return
+        worst_smi = min(self.buffer, key=lambda s: self.buffer[s]["reward"])
+        del self.buffer[worst_smi]
+
+    def _scaffold_purge(self):
+        """Remove excess molecules from overrepresented scaffolds."""
+        by_scaffold = defaultdict(list)
+        for smi, data in self.buffer.items():
+            by_scaffold[data["scaffold"]].append((smi, data["reward"]))
+
+        for scaffold, mols in by_scaffold.items():
+            if len(mols) > self.max_per_scaffold:
+                mols.sort(key=lambda x: x[1], reverse=True)
+                for smi, _ in mols[self.max_per_scaffold:]:
+                    if smi in self.buffer:
+                        del self.buffer[smi]
+
+    def sample(self, n):
+        """Sample n molecules weighted by reward. Returns list of (smiles, reward)."""
+        if not self.buffer or n <= 0:
+            return []
+        items = list(self.buffer.items())
+        weights = np.array([d["reward"] for _, d in items])
+        weights = np.clip(weights, 0.01, None)
+        weights /= weights.sum()
+        n_sample = min(n, len(items))
+        idx = np.random.choice(len(items), size=n_sample, replace=False, p=weights)
+        return [(items[i][0], items[i][1]["reward"]) for i in idx]
+
+    def __len__(self):
+        return len(self.buffer)
+
+    @property
+    def n_scaffolds(self):
+        scaffolds = set(d["scaffold"] for d in self.buffer.values())
+        return len(scaffolds)
+
+
+# ─────────────────────────────────────────────
 # REINVENT fine-tuning
 # ─────────────────────────────────────────────
 
@@ -165,7 +306,10 @@ class ReinventTrainer:
 
     def __init__(self, prior, agent, vocab, reward_fn, *,
                  sigma=0.5, lr=5e-5, batch_size=128, max_len=80,
-                 device="cpu"):
+                 device="cpu",
+                 diversity_filter=True, max_per_scaffold=25,
+                 replay_buffer_size=100, replay_max_per_scaffold=10,
+                 replay_fraction=0.5):
         self.prior = prior          # frozen
         self.agent = agent          # trainable
         self.vocab = vocab
@@ -174,13 +318,26 @@ class ReinventTrainer:
         self.batch_size = batch_size
         self.max_len = max_len
         self.device = device
+        self.replay_fraction = replay_fraction
 
         self.optimizer = torch.optim.Adam(agent.parameters(), lr=lr)
 
         # Evaluation cache: canonical SMILES -> {FitnessScore, row_dict}
         self.eval_cache = {}
 
+        # Diversity mechanisms
+        self.diversity_filter = (
+            ScaffoldDiversityFilter(max_per_scaffold=max_per_scaffold)
+            if diversity_filter else None
+        )
+        self.replay_buffer = (
+            ReplayBuffer(max_size=replay_buffer_size,
+                         max_per_scaffold=replay_max_per_scaffold)
+            if replay_buffer_size > 0 else None
+        )
+
         # Tracking
+        self.step_count = 0
         self.n_unique_evaluated = 0
         self.best_fitness = -float("inf")
         self.best_smiles = None
@@ -193,6 +350,7 @@ class ReinventTrainer:
             dict with step metrics (reward_mean, loss, n_valid, n_new, etc.)
         """
         t0 = time.time()
+        self.step_count += 1
 
         # 1. Sample SMILES from agent
         self.agent.eval()
@@ -238,26 +396,80 @@ class ReinventTrainer:
             if csmi is not None and csmi in self.eval_cache:
                 rewards[i] = self.eval_cache[csmi]["FitnessScore"]
 
-        # 5. Compute REINVENT loss
+        # 4b. Add good molecules to replay buffer
+        n_replay_used = 0
+        if self.replay_buffer is not None:
+            for i, csmi in enumerate(canonical):
+                if csmi is not None and rewards[i] > 0:
+                    self.replay_buffer.add(csmi, float(rewards[i]),
+                                           self.step_count)
+
+        # 4c. Apply scaffold diversity filter
+        n_filtered = 0
+        if self.diversity_filter is not None:
+            rewards, n_filtered = self.diversity_filter.filter_rewards(
+                canonical, rewards)
+
+        # 5. Build combined loss batch: fresh SMILES + replay SMILES
         #    Encode sampled SMILES (use original strings, not canonical,
         #    to match the token sequence the model actually produced)
-        encoded = encode_batch(smiles, self.vocab, self.device)
-        rewards_t = torch.tensor(
+        fresh_encoded = encode_batch(smiles, self.vocab, self.device)
+        fresh_rewards_t = torch.tensor(
             rewards, dtype=torch.float32, device=self.device,
         )
 
+        # Get replay molecules and encode them
+        if self.replay_buffer is not None and len(self.replay_buffer) > 0:
+            n_replay_target = int(self.batch_size * self.replay_fraction)
+            replay_samples = self.replay_buffer.sample(n_replay_target)
+            n_replay_used = len(replay_samples)
+        else:
+            replay_samples = []
+
+        if replay_samples:
+            replay_smiles = [s for s, _ in replay_samples]
+            replay_rewards = np.array([r for _, r in replay_samples])
+
+            replay_encoded = encode_batch(
+                replay_smiles, self.vocab, self.device)
+            replay_rewards_t = torch.tensor(
+                replay_rewards, dtype=torch.float32, device=self.device,
+            )
+
+            # Pad to same sequence length and concatenate
+            max_len = max(fresh_encoded.shape[1], replay_encoded.shape[1])
+            if fresh_encoded.shape[1] < max_len:
+                pad = torch.full(
+                    (fresh_encoded.shape[0], max_len - fresh_encoded.shape[1]),
+                    self.vocab.pad_idx, dtype=torch.long, device=self.device,
+                )
+                fresh_encoded = torch.cat([fresh_encoded, pad], dim=1)
+            if replay_encoded.shape[1] < max_len:
+                pad = torch.full(
+                    (replay_encoded.shape[0], max_len - replay_encoded.shape[1]),
+                    self.vocab.pad_idx, dtype=torch.long, device=self.device,
+                )
+                replay_encoded = torch.cat([replay_encoded, pad], dim=1)
+
+            all_encoded = torch.cat([fresh_encoded, replay_encoded], dim=0)
+            all_rewards_t = torch.cat([fresh_rewards_t, replay_rewards_t], dim=0)
+        else:
+            all_encoded = fresh_encoded
+            all_rewards_t = fresh_rewards_t
+
+        # Compute augmented likelihood loss on combined batch
         self.prior.eval()
         with torch.no_grad():
             prior_lp = self.prior.log_prob_of_sequence(
-                encoded, pad_idx=self.vocab.pad_idx,
+                all_encoded, pad_idx=self.vocab.pad_idx,
             )
 
         self.agent.train()
         agent_lp = self.agent.log_prob_of_sequence(
-            encoded, pad_idx=self.vocab.pad_idx,
+            all_encoded, pad_idx=self.vocab.pad_idx,
         )
 
-        augmented = prior_lp + self.sigma * rewards_t
+        augmented = prior_lp + self.sigma * all_rewards_t
         loss = ((augmented - agent_lp) ** 2).mean()
 
         self.optimizer.zero_grad()
@@ -265,12 +477,16 @@ class ReinventTrainer:
         nn.utils.clip_grad_norm_(self.agent.parameters(), 1.0)
         self.optimizer.step()
 
-        # 6. Track convergence
-        batch_best = float(rewards.max()) if rewards.max() > 0 else 0.0
+        # 6. Track convergence (use unfiltered rewards for best tracking)
+        raw_rewards = np.zeros(len(smiles))
+        for i, csmi in enumerate(canonical):
+            if csmi is not None and csmi in self.eval_cache:
+                raw_rewards[i] = self.eval_cache[csmi]["FitnessScore"]
+
+        batch_best = float(raw_rewards.max()) if raw_rewards.max() > 0 else 0.0
         if batch_best > self.best_fitness + 0.01:
             self.best_fitness = batch_best
-            # Find best SMILES
-            best_idx = int(rewards.argmax())
+            best_idx = int(raw_rewards.argmax())
             self.best_smiles = canonical[best_idx]
             self.steps_since_improvement = 0
         else:
@@ -279,7 +495,7 @@ class ReinventTrainer:
         n_valid = sum(parseable_mask)
         elapsed = time.time() - t0
 
-        return {
+        metrics = {
             "reward_mean": float(rewards.mean()),
             "reward_max": float(rewards.max()),
             "loss": float(loss.item()),
@@ -290,7 +506,17 @@ class ReinventTrainer:
             "best_smiles": self.best_smiles,
             "steps_since_improvement": self.steps_since_improvement,
             "elapsed": elapsed,
+            # Diversity metrics
+            "n_filtered": n_filtered,
+            "n_replay": n_replay_used,
+            "n_scaffolds": (self.diversity_filter.n_scaffolds
+                            if self.diversity_filter else 0),
+            "n_saturated": (self.diversity_filter.n_saturated
+                            if self.diversity_filter else 0),
+            "replay_size": len(self.replay_buffer)
+                           if self.replay_buffer else 0,
         }
+        return metrics
 
     def get_all_evaluated(self):
         """Return DataFrame of all unique evaluated molecules.

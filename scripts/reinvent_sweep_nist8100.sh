@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -N reinvent_nist8100
+#PBS -N reinvent_div_nist8100
 #PBS -l walltime=72:00:00
 #PBS -l select=1:ncpus=1:mem=32gb
 #PBS -J 0-119
@@ -9,7 +9,7 @@
 set -o pipefail
 
 # ============================================================
-# REINVENT NIST 8100 Sweep
+# REINVENT NIST 8100 Diversity Sweep
 # ============================================================
 #
 # Matches molprice_sweep_nist8100.sh exactly: same 120-job grid,
@@ -138,7 +138,7 @@ TOX_THRESHOLD=3
 # ==============================
 # Setup output directory
 # ==============================
-output_dir="../outputs/reinvent_sweep_nist8100/${LEVEL}_${CATEGORY}_seed${SEED}"
+output_dir="../outputs/reinvent_diversity_sweep_nist8100/${LEVEL}_${CATEGORY}_seed${SEED}"
 mkdir -p "$output_dir"
 
 log_file="${output_dir}/config.log"
@@ -186,6 +186,10 @@ python3 ../src/reinvent/run_reinvent.py \
     --tox_threshold $TOX_THRESHOLD \
     --molprice_soft $MOLPRICE_SOFT \
     --molprice_hard $MOLPRICE_HARD \
+    --diversity_filter \
+    --max_per_scaffold 25 \
+    --replay_buffer_size 100 \
+    --replay_fraction 0.5 \
     --model_dir ../models \
     --training_data_dir ../training/data \
     --output_dir $output_dir \
