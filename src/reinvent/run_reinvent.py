@@ -152,6 +152,12 @@ def main():
                         choices=["strict"])
     parser.add_argument("--molprice_soft", type=float, default=0.0)
     parser.add_argument("--molprice_hard", type=float, default=0.0)
+    parser.add_argument("--soft_constraints", action="store_true",
+                        default=False,
+                        help="Use soft sigmoid constraint penalties "
+                             "instead of hard gates")
+    parser.add_argument("--no_soft_constraints", action="store_false",
+                        dest="soft_constraints")
 
     # --- REINVENT-specific ---
     parser.add_argument("--pretrain_epochs", type=int, default=30)
@@ -263,6 +269,7 @@ def main():
         stability_mode=args.stability_mode,
         molprice_soft=args.molprice_soft,
         molprice_hard=args.molprice_hard,
+        soft_constraints=args.soft_constraints,
     )
 
     # ─── Phase 2: REINVENT Fine-tuning ─────────

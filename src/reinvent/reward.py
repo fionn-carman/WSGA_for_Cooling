@@ -3,6 +3,11 @@
 Critical for fair comparison: uses the same XGBoost models, the same
 descriptor computation, the same validity filtering, the same fitness
 function, and the same MolPrice penalty as WSGA.
+
+Supports two modes:
+  - Hard constraints (default): binary is_valid gate — same as WSGA.
+  - Soft constraints: multiplicative sigmoid penalties give dense reward
+    signal, letting the agent learn the FOM1-vs-flash-point trade-off.
 """
 
 import os
@@ -11,6 +16,7 @@ import sys
 import numpy as np
 import pandas as pd
 from rdkit import Chem
+from rdkit.Chem import Descriptors
 
 # Ensure src/ is on the path so we can import wsga_helper, etc.
 _src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -26,9 +32,82 @@ from wsga_helper import (
     load_tox21_predictor,
     load_biodeg_model,
     compute_mahalanobis_params,
+    has_invalid_fragments,
+    has_small_rings,
 )
 from SCScorer import SCScorer
 from evaluation import strict_canonicalize_smiles
+
+
+# ─────────────────────────────────────────────
+# Soft constraint helpers
+# ─────────────────────────────────────────────
+
+def _sigmoid(x):
+    """Numerically stable sigmoid."""
+    return 1.0 / (1.0 + np.exp(-np.clip(x, -500, 500)))
+
+
+def soft_constraint_score(row, bp_threshold, mp_threshold, fp_threshold,
+                          dc_threshold, sc_threshold, tox_threshold,
+                          use_biodeg):
+    """Continuous constraint penalty in [0, 1].
+
+    Each violated constraint multiplies the score by a sigmoid that falls
+    smoothly from 1 (well above threshold) to ~0 (well below).  Sigmoid
+    widths are tuned per property — wider for flash point (/20) because
+    the FOM1-FP conflict needs a gentle gradient, tighter for SCScore
+    (/0.5) because synthesis cost is less negotiable.
+
+    Ported from testing/Optimisation/RL/versions/rl_v2.py:324-356.
+    """
+    score = 1.0
+
+    bp = row.get("bp", 0)
+    if bp < bp_threshold:
+        score *= float(_sigmoid((bp - bp_threshold) / 10))
+
+    mp = row.get("mp", 0)
+    if mp > mp_threshold:
+        score *= float(_sigmoid((mp_threshold - mp) / 10))
+
+    fp = row.get("fp", 999)
+    if fp < fp_threshold:
+        score *= float(_sigmoid((fp - fp_threshold) / 20))
+
+    dc = row.get("dc", 0)
+    if dc > dc_threshold:
+        score *= float(_sigmoid((dc_threshold - dc) / 2))
+
+    tox = row.get("Tox21_Score", 0)
+    if tox > tox_threshold:
+        score *= float(_sigmoid((tox_threshold - tox) / 1))
+
+    sc = row.get("SCScore", 0)
+    if sc > sc_threshold:
+        score *= float(_sigmoid((sc_threshold - sc) / 0.5))
+
+    if use_biodeg and not row.get("Biodegradable", False):
+        score *= 0.1  # Large penalty but not zero
+
+    return score
+
+
+def _has_structural_issues(smiles, stability_mode=None):
+    """Check hard structural filters that cannot be softened.
+
+    Returns True if the molecule has invalid fragments, radicals,
+    small rings, or valence errors — these are chemical impossibilities,
+    not tunable constraints.
+    """
+    if has_invalid_fragments(smiles, stability_mode=stability_mode):
+        return True
+    mol = Chem.MolFromSmiles(smiles) if isinstance(smiles, str) else None
+    if mol is None:
+        return True
+    if Descriptors.NumRadicalElectrons(mol) > 0:
+        return True
+    return False
 
 
 # Target configuration (must match wsga.py exactly)
@@ -94,6 +173,7 @@ class CoolingFluidReward:
         stability_mode=None,
         molprice_soft=0.0,
         molprice_hard=0.0,
+        soft_constraints=False,
     ):
         self.target = target
         self.sc_threshold = sc_threshold
@@ -106,6 +186,7 @@ class CoolingFluidReward:
         self.stability_mode = stability_mode
         self.molprice_soft = molprice_soft
         self.molprice_hard = molprice_hard
+        self.soft_constraints = soft_constraints
 
         # --- Load all models (same as wsga.py) ---
         print("\nLoading models for REINVENT reward...")
@@ -151,6 +232,8 @@ class CoolingFluidReward:
         if self.mahal_params:
             print(f"Mahalanobis ready for {len(self.mahal_params)} models")
 
+        if self.soft_constraints:
+            print("Soft constraints ENABLED (sigmoid penalties)")
         print("REINVENT reward models loaded.\n")
 
     def evaluate_batch(self, smiles_list):
@@ -188,7 +271,7 @@ class CoolingFluidReward:
 
         df = pd.DataFrame({"SMILES": canonical})
 
-        # --- Exact WSGA pipeline ---
+        # --- Property evaluation (shared by both paths) ---
         df = evaluate_molecules(
             df,
             thermo_models=self.thermo_models,
@@ -199,6 +282,7 @@ class CoolingFluidReward:
             mahal_params=self.mahal_params,
         )
 
+        # Always compute is_valid for logging/tracking
         df = assign_validity(
             df,
             sc_threshold=self.sc_threshold,
@@ -211,13 +295,59 @@ class CoolingFluidReward:
             stability_mode=self.stability_mode,
         )
 
-        df = compute_fitness(df, self.target, TARGET_CONFIG)
+        if self.soft_constraints:
+            # --- Soft constraint path ---
+            # Get raw target value (without is_valid gate)
+            target_col = TARGET_CONFIG[self.target]["column"]
+            maximize = TARGET_CONFIG[self.target]["maximize"]
 
-        df = apply_molprice_penalty(
-            df,
-            soft_threshold=self.molprice_soft,
-            hard_threshold=self.molprice_hard,
-        )
+            soft_scores = np.zeros(len(df))
+            for j in range(len(df)):
+                row = df.iloc[j]
+                smi = row["SMILES"]
+
+                # Hard structural filters — chemical impossibilities get 0
+                if _has_structural_issues(smi, self.stability_mode):
+                    soft_scores[j] = 0.0
+                    continue
+
+                # Raw target value
+                fom1 = row.get(target_col, 0)
+                if not maximize:
+                    fom1 = -fom1
+                if fom1 <= 0 or np.isnan(fom1):
+                    soft_scores[j] = 0.0
+                    continue
+
+                # Multiplicative sigmoid penalty
+                c_score = soft_constraint_score(
+                    row,
+                    bp_threshold=self.bp_threshold,
+                    mp_threshold=self.mp_threshold,
+                    fp_threshold=self.fp_threshold,
+                    dc_threshold=self.dc_threshold,
+                    sc_threshold=self.sc_threshold,
+                    tox_threshold=self.tox_threshold,
+                    use_biodeg=self.use_biodeg,
+                )
+                soft_scores[j] = fom1 * c_score
+
+            df["FitnessScore"] = soft_scores
+
+            # Still apply MolPrice penalty on top
+            df = apply_molprice_penalty(
+                df,
+                soft_threshold=self.molprice_soft,
+                hard_threshold=self.molprice_hard,
+            )
+        else:
+            # --- Hard constraint path (original WSGA pipeline) ---
+            df = compute_fitness(df, self.target, TARGET_CONFIG)
+            df = apply_molprice_penalty(
+                df,
+                soft_threshold=self.molprice_soft,
+                hard_threshold=self.molprice_hard,
+            )
 
         # Map rewards back to original positions
         j = 0
