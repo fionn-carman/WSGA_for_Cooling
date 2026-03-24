@@ -121,7 +121,7 @@ MODELS = {
     "fp":        {"csv": "constraints/flashpoint_cleaned.csv",    "col_40": "flashpoint",  "log": False},
     "bp":        {"csv": "constraints/BP-Measured_cleaned.csv",   "col_40": "BP-Measured", "log": False},
     "mp":        {"csv": "constraints/MP-Measured_cleaned.csv",   "col_40": "MP-Measured", "log": False},
-    "dc":        {"csv": "constraints/DC_exp_cleaned.csv",        "col_40": "DC_exp",      "log": False},
+    "dc":        {"csv": "constraints/DC_exp_cleaned.csv",        "col_40": "DC_exp",      "log": True},
 }
 
 SCRIPT_DIR = Path(__file__).resolve().parent
