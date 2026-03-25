@@ -14,45 +14,34 @@
 # Usage:
 #   qsub train_chno_models.sh          # all 10 jobs
 #   qsub -J 0-0 train_chno_models.sh   # single test job (density)
-#   bash train_chno_models.sh 0         # local test
 
-# --- Conda activation ---
+PROPERTIES=(density viscosity tc cpsat beta fom1 fp bp mp dc)
+PROP=${PROPERTIES[$PBS_ARRAY_INDEX]}
+
+PROJ_DIR="/rds/general/user/fc4018/projects/fionn2023/live/WSGA_for_Cooling"
+TRAIN_DIR="${PROJ_DIR}/training/CHNO"
+LOG_DIR="${TRAIN_DIR}/logs"
+
+mkdir -p "$LOG_DIR"
+LOGFILE="${LOG_DIR}/${PROP}_${PBS_JOBID}.log"
+
+exec > "$LOGFILE" 2>&1
+echo "=== CHNO Training: ${PROP} ==="
+echo "Job ID: ${PBS_JOBID}"
+echo "Array index: ${PBS_ARRAY_INDEX}"
+echo "Node: $(hostname)"
+echo "Start: $(date)"
+echo ""
+
 eval "$(~/miniforge3/bin/conda shell.bash hook)"
 conda activate mol-rl
 
-# --- Array index ---
-if [ -n "$PBS_ARRAY_INDEX" ]; then
-    IDX=$PBS_ARRAY_INDEX
-else
-    IDX=${1:-0}
-fi
+cd "$TRAIN_DIR"
 
-# --- Map index to property ---
-PROPERTIES=("density" "viscosity" "tc" "cpsat" "beta" "fom1" "fp" "bp" "mp" "dc")
-PROP=${PROPERTIES[$IDX]}
-
-if [ -z "$PROP" ]; then
-    echo "ERROR: Invalid array index $IDX (max 9)"
-    exit 1
-fi
-
-echo "=== CHNO Training: $PROP (index $IDX) ==="
-echo "Date: $(date)"
-echo "Host: $(hostname)"
-
-# --- Navigate to training directory ---
-cd ~/mol-rl/training/CHNO/ || { echo "ERROR: Cannot cd to training/CHNO/"; exit 1; }
-
-# --- Log file ---
-LOGDIR="logs"
-mkdir -p "$LOGDIR"
-LOGFILE="$LOGDIR/${PROP}_$(date +%Y%m%d_%H%M%S).log"
-
-# --- Train ---
 python train_single_temp.py \
     --properties "$PROP" \
     --n_trials 100 \
-    --timeout 600 \
-    2>&1 | tee "$LOGFILE"
+    --timeout 600
 
-echo "=== Done: $PROP ($(date)) ==="
+echo ""
+echo "=== Done: ${PROP} ($(date)) ==="
