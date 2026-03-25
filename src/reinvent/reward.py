@@ -147,6 +147,34 @@ def load_nist8100_corpus(training_data_dir):
     return smiles_list
 
 
+def load_expanded_corpus(pubchem_path, nist_path=None):
+    """Load PubChem C/H/O corpus, optionally merged with NIST 8100.
+
+    Args:
+        pubchem_path: path to curated PubChem CSV (single SMILES column).
+        nist_path: if provided, path to training data dir for NIST 8100
+                   (passed to load_nist8100_corpus).
+
+    Returns:
+        Sorted list of unique canonical SMILES.
+    """
+    pubchem_df = pd.read_csv(pubchem_path)
+    pubchem_smiles = set(pubchem_df["SMILES"].dropna().tolist())
+    print(f"Loaded {len(pubchem_smiles)} PubChem CHO SMILES from {pubchem_path}")
+
+    if nist_path:
+        nist_smiles = load_nist8100_corpus(nist_path)
+        n_before = len(pubchem_smiles)
+        pubchem_smiles.update(nist_smiles)
+        n_new = len(pubchem_smiles) - n_before
+        print(f"Merged with NIST 8100: +{n_new} new, "
+              f"{len(pubchem_smiles)} total unique")
+
+    smiles_list = sorted(pubchem_smiles)
+    print(f"Expanded corpus: {len(smiles_list)} unique SMILES")
+    return smiles_list
+
+
 class CoolingFluidReward:
     """Reward function using the identical WSGA evaluation pipeline.
 

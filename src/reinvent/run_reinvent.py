@@ -33,8 +33,9 @@ if _src_dir not in sys.path:
 
 from reinvent.vocabulary import SMILESVocabulary
 from reinvent.model import GRUModel
-from reinvent.reward import CoolingFluidReward, load_nist8100_corpus
+from reinvent.reward import CoolingFluidReward, load_nist8100_corpus, load_expanded_corpus
 from reinvent.trainer import pretrain, ReinventTrainer
+from reinvent.augment import augment_corpus
 
 RDLogger.DisableLog("rdApp.*")
 
@@ -173,6 +174,22 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--log_interval", type=int, default=10)
 
+    # --- Prior corpus ---
+    parser.add_argument("--prior_corpus", type=str, default="nist8100",
+                        choices=["nist8100", "pubchem", "pubchem+nist"],
+                        help="Pretraining corpus: nist8100 (default), "
+                             "pubchem (PubChem CHO only), or "
+                             "pubchem+nist (merged)")
+    parser.add_argument("--pubchem_path", type=str, default=None,
+                        help="Path to curated PubChem CHO CSV "
+                             "(required if --prior_corpus is pubchem or "
+                             "pubchem+nist)")
+    parser.add_argument("--augment", action="store_true", default=False,
+                        help="Enable SMILES augmentation for pretraining")
+    parser.add_argument("--n_augmentations", type=int, default=None,
+                        help="Augmentation multiplier per molecule "
+                             "(auto-selected by corpus size if omitted)")
+
     # --- Diversity mechanisms ---
     parser.add_argument("--diversity_filter", action="store_true",
                         default=True,
@@ -216,15 +233,33 @@ def main():
     print("=" * 60)
 
     # ─── Load pre-training corpus ──────────────
-    corpus = load_nist8100_corpus(args.training_data_dir)
+    if args.prior_corpus == "nist8100":
+        corpus = load_nist8100_corpus(args.training_data_dir)
+    elif args.prior_corpus == "pubchem":
+        if not args.pubchem_path:
+            raise ValueError("--pubchem_path required when --prior_corpus=pubchem")
+        corpus = load_expanded_corpus(args.pubchem_path, nist_path=None)
+    elif args.prior_corpus == "pubchem+nist":
+        if not args.pubchem_path:
+            raise ValueError("--pubchem_path required when --prior_corpus=pubchem+nist")
+        corpus = load_expanded_corpus(args.pubchem_path,
+                                      nist_path=args.training_data_dir)
+    else:
+        raise ValueError(f"Unknown prior_corpus: {args.prior_corpus}")
+
     if len(corpus) == 0:
-        raise RuntimeError("No training SMILES found — check --training_data_dir")
+        raise RuntimeError("No training SMILES found — check corpus settings")
 
     # ─── Build vocabulary ──────────────────────
+    # Build vocab from canonical corpus (augmented SMILES use same chars)
     vocab = SMILESVocabulary().build(corpus)
     vocab_path = os.path.join(args.output_dir, "vocabulary.json")
     vocab.save(vocab_path)
     print(f"Vocabulary: {len(vocab)} tokens, saved to {vocab_path}")
+
+    # ─── Augment corpus if requested ──────────
+    if args.augment:
+        corpus = augment_corpus(corpus, n_augmentations=args.n_augmentations)
 
     # ─── Create model ─────────────────────────
     model = GRUModel(len(vocab), embed_dim=128, hidden_dim=512,
@@ -234,13 +269,14 @@ def main():
 
     # ─── Phase 1: Pre-training ─────────────────
     print("\n" + "=" * 60)
-    print(f"PHASE 1: Pre-training ({args.pretrain_epochs} epochs)")
+    print(f"PHASE 1: Pre-training ({args.pretrain_epochs} epochs, "
+          f"{len(corpus)} SMILES)")
     print("=" * 60)
 
     model = pretrain(
         model, vocab, corpus,
         epochs=args.pretrain_epochs,
-        batch_size=args.batch_size,
+        batch_size=max(args.batch_size, 512) if len(corpus) > 50000 else args.batch_size,
         lr=args.lr_pretrain,
         device=device,
     )
