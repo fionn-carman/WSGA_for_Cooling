@@ -19,7 +19,7 @@ set -o pipefail
 #   - --prior_corpus pubchem+nist
 #   - --pubchem_path data/pubchem_cho_5_30ha.csv
 #   - --pretrain_epochs 50 (larger corpus needs more epochs)
-#   - --augment enabled (randomized SMILES augmentation)
+#   - no augmentation (504K corpus is large enough without it)
 #
 # Sweep grid: 6 threshold levels x 4 categories x 5 seeds = 120 jobs
 #
@@ -138,7 +138,7 @@ echo "Category:          $CATEGORY"             >> "$log_file"
 echo "Target:            $TARGET"               >> "$log_file"
 echo "Prior corpus:      pubchem+nist"          >> "$log_file"
 echo "Pretrain epochs:   $PRETRAIN_EPOCHS"      >> "$log_file"
-echo "Augmentation:      enabled"               >> "$log_file"
+echo "Augmentation:      disabled"              >> "$log_file"
 echo "RL steps (max):    $RL_STEPS"             >> "$log_file"
 echo "Batch size:        $BATCH_SIZE"           >> "$log_file"
 echo "Sigma:             $SIGMA"                >> "$log_file"
@@ -162,7 +162,6 @@ python3 ../src/reinvent/run_reinvent.py \
     --target $TARGET \
     --prior_corpus pubchem+nist \
     --pubchem_path ../data/pubchem_cho_5_30ha.csv \
-    --augment \
     --pretrain_epochs $PRETRAIN_EPOCHS \
     --rl_steps $RL_STEPS \
     --batch_size $BATCH_SIZE \
