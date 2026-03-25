@@ -259,3 +259,88 @@ def generate_initial_population(
         )
 
     return pd.DataFrame({"SMILES": population_smiles})
+
+
+# ---------------------------
+# PubChem direct sampling
+# ---------------------------
+
+def sample_pubchem_population(
+    n,
+    pubchem_path,
+    max_heavy_atoms,
+    min_heavy_atoms,
+    max_carbons,
+    max_oxygens,
+    seed=None,
+):
+    """
+    Sample initial population directly from a PubChem CHO CSV file.
+
+    Applies the same chemical filters as generate_initial_population
+    (C/O only, atom counts, valid rings) but draws from a pre-existing
+    corpus instead of generating via n-gram.
+
+    Args:
+        n: number of molecules to collect
+        pubchem_path: path to CSV with a SMILES column
+        max_heavy_atoms: maximum heavy atom count
+        min_heavy_atoms: minimum heavy atom count
+        max_carbons: maximum carbon count
+        max_oxygens: maximum oxygen count
+        seed: optional random seed for reproducible shuffling
+    """
+    df_pubchem = pd.read_csv(pubchem_path)
+    all_smiles = df_pubchem["SMILES"].dropna().tolist()
+
+    rng = random.Random(seed)
+    rng.shuffle(all_smiles)
+
+    population_smiles = []
+    seen_smiles = set()
+    scanned = 0
+
+    for smi in all_smiles:
+        if len(population_smiles) >= n:
+            break
+        scanned += 1
+
+        mol = Chem.MolFromSmiles(smi)
+        if mol is None:
+            continue
+
+        if not is_CO_only(mol):
+            continue
+
+        smi = Chem.MolToSmiles(mol, canonical=True)
+        if smi in seen_smiles:
+            continue
+
+        heavy_atoms = mol.GetNumHeavyAtoms()
+        if not (min_heavy_atoms <= heavy_atoms <= max_heavy_atoms):
+            continue
+
+        counts = atom_counts(mol)
+        if counts["C"] > max_carbons or counts["O"] > max_oxygens:
+            continue
+
+        if not has_valid_rings(mol):
+            continue
+
+        population_smiles.append(smi)
+        seen_smiles.add(smi)
+
+    yield_pct = (len(population_smiles) / scanned) * 100 if scanned > 0 else 0
+
+    if len(population_smiles) < n:
+        print(
+            f"Warning: Only sampled {len(population_smiles)}/{n} molecules "
+            f"from {scanned} scanned (yield={yield_pct:.1f}%)."
+        )
+    else:
+        print(
+            f"Sampled {len(population_smiles)}/{n} molecules "
+            f"from {scanned} scanned (yield={yield_pct:.1f}%)."
+        )
+
+    return pd.DataFrame({"SMILES": population_smiles})

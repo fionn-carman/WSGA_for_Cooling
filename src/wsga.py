@@ -37,7 +37,7 @@ from wsga_helper import (
 from evaluation import get_scscore_cached, strict_canonicalize_smiles
 from fragment_utils import prepare_fragments, crossover_fragments, crossover_mol_fragments
 from SCScorer import SCScorer
-from generate_molecules import generate_initial_population, load_combined_training_data
+from generate_molecules import generate_initial_population, load_combined_training_data, sample_pubchem_population
 
 
 # =============================
@@ -105,8 +105,22 @@ parser.add_argument("--best_elite_ratio", type=float, default=0.3,
 parser.add_argument("--stability_mode", type=str, default=None,
     choices=["strict"],
     help="'strict': bans alkenes, glymes, limits ethers/esters/oxygens")
+parser.add_argument("--init_method", type=str, default="ngram",
+    choices=["ngram", "pubchem"],
+    help="Initial population method: 'ngram' (default) or 'pubchem' (sample from PubChem CSV)")
+parser.add_argument("--pubchem_path", type=str, default=None,
+    help="Path to PubChem CHO CSV file (required when --init_method pubchem)")
+parser.add_argument("--seed", type=int, default=None,
+    help="Random seed for reproducibility")
 
 args = parser.parse_args()
+
+if args.init_method == "pubchem" and args.pubchem_path is None:
+    parser.error("--pubchem_path is required when --init_method is 'pubchem'")
+
+if args.seed is not None:
+    random.seed(args.seed)
+    np.random.seed(args.seed)
 
 
 # =============================
@@ -225,6 +239,12 @@ else:
     print(f"MolPrice penalty: disabled (no --molprice_model)")
 print(f"--- Stability Mode ---")
 print(f"Stability mode: {STABILITY_MODE}")
+print(f"--- Init Method ---")
+print(f"Init method: {args.init_method}")
+if args.init_method == "pubchem":
+    print(f"PubChem path: {args.pubchem_path}")
+if args.seed is not None:
+    print(f"Random seed: {args.seed}")
 print(f"Training data dir: {args.training_data_dir}")
 print(f"==============================================")
 
@@ -539,18 +559,31 @@ def main():
 
     # ----- Initialize Population -----
     print("Generating initial population...")
-    print("Loading combined training data for n-gram model...")
-    training_smiles = load_combined_training_data(DATA_DIR)
-    print(f"Combined training set: {len(training_smiles)} unique C/O molecules")
 
-    df = generate_initial_population(
-        n=INITIAL_POPULATION_SIZE,
-        max_heavy_atoms=MAX_HEAVY_ATOMS,
-        min_heavy_atoms=MIN_HEAVY_ATOMS,
-        max_carbons=MAX_CARBONS,
-        max_oxygens=MAX_OXYGENS,
-        training_smiles=training_smiles,
-    )
+    if args.init_method == "pubchem":
+        print(f"Sampling from PubChem corpus: {args.pubchem_path}")
+        df = sample_pubchem_population(
+            n=INITIAL_POPULATION_SIZE,
+            pubchem_path=args.pubchem_path,
+            max_heavy_atoms=MAX_HEAVY_ATOMS,
+            min_heavy_atoms=MIN_HEAVY_ATOMS,
+            max_carbons=MAX_CARBONS,
+            max_oxygens=MAX_OXYGENS,
+            seed=args.seed,
+        )
+        training_smiles = load_combined_training_data(DATA_DIR)
+    else:
+        print("Loading combined training data for n-gram model...")
+        training_smiles = load_combined_training_data(DATA_DIR)
+        print(f"Combined training set: {len(training_smiles)} unique C/O molecules")
+        df = generate_initial_population(
+            n=INITIAL_POPULATION_SIZE,
+            max_heavy_atoms=MAX_HEAVY_ATOMS,
+            min_heavy_atoms=MIN_HEAVY_ATOMS,
+            max_carbons=MAX_CARBONS,
+            max_oxygens=MAX_OXYGENS,
+            training_smiles=training_smiles,
+        )
 
     df = df[["SMILES"]].copy()
     df["SMILES"] = df["SMILES"].apply(strict_canonicalize_smiles)
@@ -861,14 +894,25 @@ def main():
                     
                     # Generate fresh molecules
                     print(f"Generating {n_fresh} fresh molecules...")
-                    fresh_df = generate_initial_population(
-                        n=n_fresh * 3,  # Generate extra to account for filtering
-                        training_smiles=training_smiles,
-                        min_heavy_atoms=MIN_HEAVY_ATOMS,
-                        max_heavy_atoms=MAX_HEAVY_ATOMS,
-                        max_carbons=MAX_CARBONS,
-                        max_oxygens=MAX_OXYGENS
-                    )
+                    if args.init_method == "pubchem":
+                        fresh_df = sample_pubchem_population(
+                            n=n_fresh * 3,
+                            pubchem_path=args.pubchem_path,
+                            max_heavy_atoms=MAX_HEAVY_ATOMS,
+                            min_heavy_atoms=MIN_HEAVY_ATOMS,
+                            max_carbons=MAX_CARBONS,
+                            max_oxygens=MAX_OXYGENS,
+                            seed=None,
+                        )
+                    else:
+                        fresh_df = generate_initial_population(
+                            n=n_fresh * 3,
+                            training_smiles=training_smiles,
+                            min_heavy_atoms=MIN_HEAVY_ATOMS,
+                            max_heavy_atoms=MAX_HEAVY_ATOMS,
+                            max_carbons=MAX_CARBONS,
+                            max_oxygens=MAX_OXYGENS,
+                        )
                     
                     # Filter for unseen molecules
                     fresh_smiles = [s for s in fresh_df['SMILES'] if strict_canonicalize_smiles(s) not in seen_smiles][:n_fresh]
