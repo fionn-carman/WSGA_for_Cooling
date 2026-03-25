@@ -18,6 +18,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 
 import argparse
 import copy
+import shutil
 import sys
 import time
 
@@ -190,6 +191,19 @@ def main():
                         help="Augmentation multiplier per molecule "
                              "(auto-selected by corpus size if omitted)")
 
+    # --- Pretrained prior reuse ---
+    parser.add_argument("--prior_path", type=str, default=None,
+                        help="Path to pretrained prior.pt weights. "
+                             "Skips Phase 1 pretraining if provided.")
+    parser.add_argument("--vocab_path", type=str, default=None,
+                        help="Path to vocabulary.json matching the prior. "
+                             "Required if --prior_path is set.")
+    parser.add_argument("--pretrain_only", action="store_true", default=False,
+                        help="Run Phase 1 only (pretrain + save), then exit.")
+    parser.add_argument("--device", type=str, default="cpu",
+                        choices=["cpu", "cuda"],
+                        help="Device for pretraining (cpu or cuda)")
+
     # --- Diversity mechanisms ---
     parser.add_argument("--diversity_filter", action="store_true",
                         default=True,
@@ -208,6 +222,14 @@ def main():
 
     args = parser.parse_args()
 
+    # ─── Validate prior reuse flags ──────────────
+    if args.prior_path and not args.vocab_path:
+        parser.error("--vocab_path is required when --prior_path is set")
+    if args.vocab_path and not args.prior_path:
+        parser.error("--prior_path is required when --vocab_path is set")
+    if args.prior_path and args.pretrain_only:
+        parser.error("--prior_path and --pretrain_only are mutually exclusive")
+
     # ─── Setup ─────────────────────────────────
     os.makedirs(args.output_dir, exist_ok=True)
     log_file = setup_logging(args.output_dir)
@@ -218,7 +240,12 @@ def main():
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    device = torch.device("cpu")  # GRU is tiny; bottleneck is Mordred
+    if args.device == "cuda" and not torch.cuda.is_available():
+        print("WARNING: --device cuda but CUDA not available, falling back to CPU")
+        device = torch.device("cpu")
+    else:
+        device = torch.device(args.device)
+    print(f"Using device: {device}")
 
     # Output paths (match wsga.py names)
     all_eval_path = os.path.join(args.output_dir, "all_evaluated_molecules.csv")
@@ -232,55 +259,92 @@ def main():
         print(f"  {k}: {v}")
     print("=" * 60)
 
-    # ─── Load pre-training corpus ──────────────
-    if args.prior_corpus == "nist8100":
-        corpus = load_nist8100_corpus(args.training_data_dir)
-    elif args.prior_corpus == "pubchem":
-        if not args.pubchem_path:
-            raise ValueError("--pubchem_path required when --prior_corpus=pubchem")
-        corpus = load_expanded_corpus(args.pubchem_path, nist_path=None)
-    elif args.prior_corpus == "pubchem+nist":
-        if not args.pubchem_path:
-            raise ValueError("--pubchem_path required when --prior_corpus=pubchem+nist")
-        corpus = load_expanded_corpus(args.pubchem_path,
-                                      nist_path=args.training_data_dir)
+    if args.prior_path:
+        # ─── Load pretrained prior ────────────────
+        print("\n" + "=" * 60)
+        print(f"Loading pretrained prior from {args.prior_path}")
+        print("=" * 60)
+
+        vocab = SMILESVocabulary.load(args.vocab_path)
+        print(f"Vocabulary: {len(vocab)} tokens, loaded from {args.vocab_path}")
+
+        model = GRUModel(len(vocab), embed_dim=128, hidden_dim=512,
+                         num_layers=3).to(device)
+        state_dict = torch.load(args.prior_path, map_location=device,
+                                weights_only=True)
+        model.load_state_dict(state_dict)
+        n_params = sum(p.numel() for p in model.parameters())
+        print(f"GRU model: {n_params:,} parameters (loaded)")
+
+        # Copy to output_dir for reproducibility
+        shutil.copy2(args.vocab_path,
+                     os.path.join(args.output_dir, "vocabulary.json"))
+        torch.save(model.state_dict(),
+                   os.path.join(args.output_dir, "prior.pt"))
+
     else:
-        raise ValueError(f"Unknown prior_corpus: {args.prior_corpus}")
+        # ─── Load pre-training corpus ──────────────
+        if args.prior_corpus == "nist8100":
+            corpus = load_nist8100_corpus(args.training_data_dir)
+        elif args.prior_corpus == "pubchem":
+            if not args.pubchem_path:
+                raise ValueError(
+                    "--pubchem_path required when --prior_corpus=pubchem")
+            corpus = load_expanded_corpus(args.pubchem_path, nist_path=None)
+        elif args.prior_corpus == "pubchem+nist":
+            if not args.pubchem_path:
+                raise ValueError(
+                    "--pubchem_path required when --prior_corpus=pubchem+nist")
+            corpus = load_expanded_corpus(args.pubchem_path,
+                                          nist_path=args.training_data_dir)
+        else:
+            raise ValueError(f"Unknown prior_corpus: {args.prior_corpus}")
 
-    if len(corpus) == 0:
-        raise RuntimeError("No training SMILES found — check corpus settings")
+        if len(corpus) == 0:
+            raise RuntimeError("No training SMILES found — check corpus settings")
 
-    # ─── Build vocabulary ──────────────────────
-    # Build vocab from canonical corpus (augmented SMILES use same chars)
-    vocab = SMILESVocabulary().build(corpus)
-    vocab_path = os.path.join(args.output_dir, "vocabulary.json")
-    vocab.save(vocab_path)
-    print(f"Vocabulary: {len(vocab)} tokens, saved to {vocab_path}")
+        # ─── Build vocabulary ──────────────────────
+        vocab = SMILESVocabulary().build(corpus)
+        vocab_path = os.path.join(args.output_dir, "vocabulary.json")
+        vocab.save(vocab_path)
+        print(f"Vocabulary: {len(vocab)} tokens, saved to {vocab_path}")
 
-    # ─── Augment corpus if requested ──────────
-    if args.augment:
-        corpus = augment_corpus(corpus, n_augmentations=args.n_augmentations)
+        # ─── Augment corpus if requested ──────────
+        if args.augment:
+            corpus = augment_corpus(corpus,
+                                    n_augmentations=args.n_augmentations)
 
-    # ─── Create model ─────────────────────────
-    model = GRUModel(len(vocab), embed_dim=128, hidden_dim=512,
-                     num_layers=3).to(device)
-    n_params = sum(p.numel() for p in model.parameters())
-    print(f"GRU model: {n_params:,} parameters")
+        # ─── Create model ─────────────────────────
+        model = GRUModel(len(vocab), embed_dim=128, hidden_dim=512,
+                         num_layers=3).to(device)
+        n_params = sum(p.numel() for p in model.parameters())
+        print(f"GRU model: {n_params:,} parameters")
 
-    # ─── Phase 1: Pre-training ─────────────────
-    print("\n" + "=" * 60)
-    print(f"PHASE 1: Pre-training ({args.pretrain_epochs} epochs, "
-          f"{len(corpus)} SMILES)")
-    print("=" * 60)
+        # ─── Phase 1: Pre-training ─────────────────
+        print("\n" + "=" * 60)
+        print(f"PHASE 1: Pre-training ({args.pretrain_epochs} epochs, "
+              f"{len(corpus)} SMILES)")
+        print("=" * 60)
 
-    model = pretrain(
-        model, vocab, corpus,
-        epochs=args.pretrain_epochs,
-        batch_size=max(args.batch_size, 512) if len(corpus) > 50000 else args.batch_size,
-        lr=args.lr_pretrain,
-        device=device,
-    )
-    torch.save(model.state_dict(), os.path.join(args.output_dir, "prior.pt"))
+        model = pretrain(
+            model, vocab, corpus,
+            epochs=args.pretrain_epochs,
+            batch_size=(max(args.batch_size, 512)
+                        if len(corpus) > 50000 else args.batch_size),
+            lr=args.lr_pretrain,
+            device=device,
+        )
+        torch.save(model.state_dict(),
+                   os.path.join(args.output_dir, "prior.pt"))
+
+    # ─── Pretrain-only early exit ─────────────
+    if args.pretrain_only:
+        print("\n" + "=" * 60)
+        print("PRETRAIN ONLY — exiting after Phase 1.")
+        print(f"Prior:  {os.path.join(args.output_dir, 'prior.pt')}")
+        print(f"Vocab:  {os.path.join(args.output_dir, 'vocabulary.json')}")
+        print("=" * 60)
+        return
 
     # ─── Create prior (frozen) + agent (trainable) ────
     prior = copy.deepcopy(model)

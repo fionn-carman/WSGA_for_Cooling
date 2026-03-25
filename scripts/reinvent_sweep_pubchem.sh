@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -N reinvent_pubchem
-#PBS -l walltime=72:00:00
+#PBS -l walltime=48:00:00
 #PBS -l select=1:ncpus=1:mem=32gb
 #PBS -J 0-119
 #PBS -o /dev/null
@@ -9,19 +9,18 @@
 set -o pipefail
 
 # ============================================================
-# REINVENT PubChem+NIST Expanded Prior Sweep
+# REINVENT PubChem+NIST Expanded Prior Sweep (RL only)
 # ============================================================
 #
-# Identical sweep grid to reinvent_sweep_nist8100.sh but using the
-# expanded PubChem CHO corpus as the prior pretraining data.
-#
-# Key differences from NIST 8100 sweep:
-#   - --prior_corpus pubchem+nist
-#   - --pubchem_path data/pubchem_cho_5_30ha.csv
-#   - --pretrain_epochs 50 (larger corpus needs more epochs)
-#   - no augmentation (504K corpus is large enough without it)
+# Uses a pretrained prior (trained separately via
+# reinvent_pretrain_pubchem_cpu/gpu.sh) to skip Phase 1 pretraining
+# in every job. Each job loads the shared prior.pt + vocabulary.json
+# and runs Phase 2 (REINVENT RL) only.
 #
 # Sweep grid: 6 threshold levels x 4 categories x 5 seeds = 120 jobs
+#
+# Prerequisites:
+#   Run reinvent_pretrain_pubchem_gpu.sh (or _cpu.sh) first.
 #
 # Usage:
 #   qsub reinvent_sweep_pubchem.sh
@@ -51,9 +50,25 @@ export KMP_DUPLICATE_LIB_OK=TRUE
 export OMP_NUM_THREADS=1
 
 # ==============================
+# Pretrained prior (skip Phase 1)
+# ==============================
+PRIOR_PATH="../outputs/pretrained_priors/pubchem_nist_gpu/prior.pt"
+VOCAB_PATH="../outputs/pretrained_priors/pubchem_nist_gpu/vocabulary.json"
+
+# Guard: check prior exists before proceeding
+if [ ! -f "$PRIOR_PATH" ]; then
+    echo "ERROR: Pretrained prior not found at $PRIOR_PATH" >&2
+    echo "Run reinvent_pretrain_pubchem_gpu.sh first." >&2
+    exit 1
+fi
+if [ ! -f "$VOCAB_PATH" ]; then
+    echo "ERROR: Vocabulary not found at $VOCAB_PATH" >&2
+    exit 1
+fi
+
+# ==============================
 # REINVENT hyperparameters
 # ==============================
-PRETRAIN_EPOCHS=50
 RL_STEPS=5000
 BATCH_SIZE=128
 SIGMA=0.5
@@ -130,15 +145,14 @@ mkdir -p "$output_dir"
 
 log_file="${output_dir}/config.log"
 echo "========================================" > "$log_file"
-echo "REINVENT PubChem+NIST Sweep"             >> "$log_file"
+echo "REINVENT PubChem+NIST Sweep (RL only)"   >> "$log_file"
 echo "========================================" >> "$log_file"
 echo "Array index:       $N"                    >> "$log_file"
 echo "Level:             $LEVEL"                >> "$log_file"
 echo "Category:          $CATEGORY"             >> "$log_file"
 echo "Target:            $TARGET"               >> "$log_file"
-echo "Prior corpus:      pubchem+nist"          >> "$log_file"
-echo "Pretrain epochs:   $PRETRAIN_EPOCHS"      >> "$log_file"
-echo "Augmentation:      disabled"              >> "$log_file"
+echo "Prior:             $PRIOR_PATH"           >> "$log_file"
+echo "Vocab:             $VOCAB_PATH"           >> "$log_file"
 echo "RL steps (max):    $RL_STEPS"             >> "$log_file"
 echo "Batch size:        $BATCH_SIZE"           >> "$log_file"
 echo "Sigma:             $SIGMA"                >> "$log_file"
@@ -160,9 +174,8 @@ echo "========================================" >> "$log_file"
 # ==============================
 python3 ../src/reinvent/run_reinvent.py \
     --target $TARGET \
-    --prior_corpus pubchem+nist \
-    --pubchem_path ../data/pubchem_cho_5_30ha.csv \
-    --pretrain_epochs $PRETRAIN_EPOCHS \
+    --prior_path $PRIOR_PATH \
+    --vocab_path $VOCAB_PATH \
     --rl_steps $RL_STEPS \
     --batch_size $BATCH_SIZE \
     --sigma $SIGMA \
