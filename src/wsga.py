@@ -19,6 +19,7 @@ from rdkit.Chem import Draw, rdchem
 from tqdm import tqdm
 import numpy as np
 import argparse
+import joblib
 
 from wsga_helper import (
     apply_mutations_to_population,
@@ -112,6 +113,8 @@ parser.add_argument("--pubchem_path", type=str, default=None,
     help="Path to PubChem CHO CSV file (required when --init_method pubchem)")
 parser.add_argument("--seed", type=int, default=None,
     help="Random seed for reproducibility")
+parser.add_argument("--fom1_mlp_model", type=str, default=None,
+    help="Path to MLP FOM1 model joblib. Overrides XGBoost fom1_40C with MLP predictions.")
 
 args = parser.parse_args()
 
@@ -540,6 +543,17 @@ def main():
     else:
         print(f"WARNING: MolPrice model not found at {_mp_path} — MolPrice column will be empty")
 
+    # FOM1 MLP override model (optional)
+    fom1_mlp_data = None
+    if args.fom1_mlp_model:
+        if os.path.exists(args.fom1_mlp_model):
+            fom1_mlp_data = joblib.load(args.fom1_mlp_model)
+            print(f"Loaded FOM1 MLP model from {args.fom1_mlp_model} "
+                  f"({len(fom1_mlp_data['selected_features'])} features)")
+        else:
+            print(f"ERROR: FOM1 MLP model not found at {args.fom1_mlp_model}")
+            sys.exit(1)
+
     # Mahalanobis OOD params (precomputed per model at startup)
     print("\nPrecomputing Mahalanobis OOD parameters...")
     mahal_params = {}
@@ -615,7 +629,8 @@ def main():
         tox21_models=tox21_models,
         biodeg_model=biodeg_model,
         molprice_model=molprice_model,
-        mahal_params=mahal_params
+        mahal_params=mahal_params,
+        fom1_mlp_data=fom1_mlp_data
     )
 
     evaluated_df = assign_validity(
@@ -766,7 +781,8 @@ def main():
             tox21_models=tox21_models,
             biodeg_model=biodeg_model,
             molprice_model=molprice_model,
-            mahal_params=mahal_params
+            mahal_params=mahal_params,
+            fom1_mlp_data=fom1_mlp_data
         )
 
         evaluated_offspring_df = assign_validity(
@@ -928,7 +944,8 @@ def main():
                             tox21_models=tox21_models,
                             biodeg_model=biodeg_model,
                             molprice_model=molprice_model,
-                            mahal_params=mahal_params
+                            mahal_params=mahal_params,
+                            fom1_mlp_data=fom1_mlp_data
                         )
                         fresh_evaluated = assign_validity(
                             fresh_evaluated,

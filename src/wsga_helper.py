@@ -270,7 +270,7 @@ def apply_mutations_to_population(
 
 def evaluate_molecules(df, thermo_models, sc_model, tox21_models, biodeg_model,
                        drop_descriptors=True, molprice_model=None,
-                       mahal_params=None):
+                       mahal_params=None, fom1_mlp_data=None):
     """
     Evaluate molecules: predict all properties using Mordred-pipeline models.
 
@@ -333,6 +333,27 @@ def evaluate_molecules(df, thermo_models, sc_model, tox21_models, biodeg_model,
         except Exception as e:
             print(f"Skipping {target}, error: {e}")
             df[target] = np.nan
+
+    # ----------------------------
+    # Override fom1_40C with MLP predictions (if enabled)
+    # ----------------------------
+    if fom1_mlp_data is not None:
+        mlp_model = fom1_mlp_data['model']
+        mlp_scaler_X = fom1_mlp_data['scaler_X']
+        mlp_scaler_y = fom1_mlp_data['scaler_y']
+        mlp_features = fom1_mlp_data['selected_features']
+        try:
+            X_mlp = df[mlp_features].copy()
+            X_mlp_scaled = mlp_scaler_X.transform(X_mlp)
+            y_mlp_scaled = mlp_model.predict(X_mlp_scaled)
+            y_mlp = mlp_scaler_y.inverse_transform(
+                y_mlp_scaled.reshape(-1, 1)
+            ).ravel()
+            if fom1_mlp_data.get('log_transform', False):
+                y_mlp = np.expm1(y_mlp)
+            df['fom1_40C'] = y_mlp
+        except Exception as e:
+            print(f"WARNING: MLP FOM1 prediction failed, keeping XGBoost: {e}")
 
     # ----------------------------
     # Predict biodegradability (using precomputed descriptor row)
