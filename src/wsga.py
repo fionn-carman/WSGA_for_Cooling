@@ -32,6 +32,8 @@ from wsga_helper import (
     compute_fitness,
     apply_molprice_penalty,
     load_regression_models_with_aux,
+    load_fold_ensemble_models,
+    compute_conformal_quantiles,
     is_stable_fragment,
     compute_mahalanobis_params,
 )
@@ -362,6 +364,10 @@ TRACKED_PROPERTIES = [
     'MolPrice', 'MolPrice_Penalty',
     # OOD
     'OOD_any', 'OOD_count',
+    # Fold ensemble uncertainty (key properties)
+    'fom1_40C_fold_mean', 'fom1_40C_fold_std',
+    'fom1_40C_ci_lower', 'fom1_40C_ci_upper',
+    'fp_fold_std', 'mp_fold_std', 'bp_fold_std', 'dc_fold_std',
 ]
 
 
@@ -569,6 +575,18 @@ def main():
         print("Mahalanobis: no params computed (training data not found)")
         mahal_params = None
 
+    # Fold ensemble models for uncertainty estimation
+    print("\nLoading fold ensemble models...")
+    fold_ensembles = load_fold_ensemble_models(thermo_targets, MODEL_DIR)
+    if fold_ensembles:
+        conformal_quantiles = compute_conformal_quantiles(
+            MODEL_DIR, list(fold_ensembles.keys()), alpha=0.1)
+        print(f"Fold ensembles ready for {len(fold_ensembles)} models")
+    else:
+        fold_ensembles = None
+        conformal_quantiles = None
+        print("No fold ensembles found — uncertainty columns will be absent")
+
     print("Models loaded successfully.\n")
 
     # ----- Initialize Population -----
@@ -630,7 +648,9 @@ def main():
         biodeg_model=biodeg_model,
         molprice_model=molprice_model,
         mahal_params=mahal_params,
-        fom1_mlp_data=fom1_mlp_data
+        fom1_mlp_data=fom1_mlp_data,
+        fold_ensembles=fold_ensembles,
+        conformal_quantiles=conformal_quantiles,
     )
 
     evaluated_df = assign_validity(
@@ -782,7 +802,9 @@ def main():
             biodeg_model=biodeg_model,
             molprice_model=molprice_model,
             mahal_params=mahal_params,
-            fom1_mlp_data=fom1_mlp_data
+            fom1_mlp_data=fom1_mlp_data,
+            fold_ensembles=fold_ensembles,
+            conformal_quantiles=conformal_quantiles,
         )
 
         evaluated_offspring_df = assign_validity(
@@ -945,7 +967,9 @@ def main():
                             biodeg_model=biodeg_model,
                             molprice_model=molprice_model,
                             mahal_params=mahal_params,
-                            fom1_mlp_data=fom1_mlp_data
+                            fom1_mlp_data=fom1_mlp_data,
+                            fold_ensembles=fold_ensembles,
+                            conformal_quantiles=conformal_quantiles,
                         )
                         fresh_evaluated = assign_validity(
                             fresh_evaluated,

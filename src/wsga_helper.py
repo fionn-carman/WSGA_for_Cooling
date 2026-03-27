@@ -270,7 +270,8 @@ def apply_mutations_to_population(
 
 def evaluate_molecules(df, thermo_models, sc_model, tox21_models, biodeg_model,
                        drop_descriptors=True, molprice_model=None,
-                       mahal_params=None, fom1_mlp_data=None):
+                       mahal_params=None, fom1_mlp_data=None,
+                       fold_ensembles=None, conformal_quantiles=None):
     """
     Evaluate molecules: predict all properties using Mordred-pipeline models.
 
@@ -387,6 +388,12 @@ def evaluate_molecules(df, thermo_models, sc_model, tox21_models, biodeg_model,
         if ood_cols:
             df['OOD_any'] = df[ood_cols].max(axis=1)
             df['OOD_count'] = (df[ood_cols] > 0).sum(axis=1)
+
+    # ----------------------------
+    # Fold ensemble uncertainty (per model)
+    # ----------------------------
+    if fold_ensembles is not None:
+        df = predict_fold_ensemble(df, fold_ensembles, conformal_quantiles)
 
     # ----------------------------
     # Drop descriptors/Mol if requested
@@ -1188,6 +1195,141 @@ def load_regression_models_with_aux(targets, model_dir):
             continue
 
     return models
+
+
+def load_fold_ensemble_models(targets, model_dir):
+    """
+    Load 5-fold XGBoost ensembles for uncertainty estimation.
+
+    Each fold model joblib contains:
+    - 'model': XGBRegressor
+    - 'scaler': StandardScaler (or None)
+    - 'selected_features': list of feature names
+    - 'log_transform': bool
+
+    Returns:
+        dict mapping target → list of 5 fold dicts
+    """
+    ensembles = {}
+
+    for target in targets:
+        fold_models = []
+        all_found = True
+        for fold_id in range(5):
+            path = os.path.join(model_dir, target, "model", f"fold{fold_id}_model.joblib")
+            if not os.path.exists(path):
+                print(f"  Warning: fold model not found: {path}")
+                all_found = False
+                break
+
+            data = joblib.load(path)
+            fold_models.append({
+                'model': data['model'],
+                'scaler': data.get('scaler'),
+                'features': data.get('selected_features', data.get('features')),
+                'log_transform': data.get('log_transform', data.get('log_target', False)),
+            })
+
+        if all_found and len(fold_models) == 5:
+            ensembles[target] = fold_models
+            n_feat = len(fold_models[0]['features'])
+            print(f"  Loaded fold ensemble: {target} (5 folds, ~{n_feat} features)")
+        else:
+            print(f"  Skipping fold ensemble for {target} (missing fold models)")
+
+    return ensembles
+
+
+def compute_conformal_quantiles(model_dir, targets, alpha=0.1):
+    """
+    Compute conformal prediction quantiles from out-of-fold residuals.
+
+    Uses constant-width conformal: q_hat = quantile(|OOF_residual|, 1-alpha).
+    At inference, the 90% prediction interval is [y_pred - q_hat, y_pred + q_hat].
+
+    Args:
+        model_dir: path to models/ directory
+        targets: list of target names
+        alpha: miscoverage rate (0.1 = 90% CI)
+
+    Returns:
+        dict mapping target → q_hat (float)
+    """
+    quantiles = {}
+
+    for target in targets:
+        preds_path = os.path.join(model_dir, target, "model", "predictions.csv")
+        if not os.path.exists(preds_path):
+            print(f"  Warning: no predictions.csv for {target}, skipping conformal")
+            continue
+
+        df = pd.read_csv(preds_path)
+        if 'residual' not in df.columns:
+            print(f"  Warning: no 'residual' column in {preds_path}")
+            continue
+
+        abs_resid = df['residual'].abs().values
+        n = len(abs_resid)
+        # Finite-sample correction: (1-alpha)(n+1)/n
+        level = min((1 - alpha) * (n + 1) / n, 1.0)
+        q = np.quantile(abs_resid, level)
+        quantiles[target] = q
+        print(f"  Conformal {target}: q_{1-alpha:.0%} = {q:.2f} (n={n})")
+
+    return quantiles
+
+
+def predict_fold_ensemble(df, fold_ensembles, conformal_quantiles=None):
+    """
+    Predict with 5-fold ensembles and compute uncertainty columns.
+
+    For each target, predicts with all 5 fold models and outputs:
+    - {target}_fold_mean: mean of 5 fold predictions
+    - {target}_fold_std: std of 5 fold predictions
+    - {target}_ci_lower: fold_mean - q_hat (if conformal available)
+    - {target}_ci_upper: fold_mean + q_hat (if conformal available)
+
+    Args:
+        df: DataFrame with descriptor columns
+        fold_ensembles: dict from load_fold_ensemble_models()
+        conformal_quantiles: dict from compute_conformal_quantiles() (optional)
+
+    Returns:
+        df with uncertainty columns added
+    """
+    if fold_ensembles is None:
+        return df
+
+    for target, folds in fold_ensembles.items():
+        fold_preds = []
+        for fold_data in folds:
+            try:
+                X_fold = df[fold_data['features']].copy()
+                if fold_data['scaler'] is not None:
+                    X_fold = pd.DataFrame(
+                        fold_data['scaler'].transform(X_fold),
+                        columns=fold_data['features'],
+                        index=df.index,
+                    )
+                pred = fold_data['model'].predict(X_fold)
+                if fold_data['log_transform']:
+                    pred = np.expm1(pred)
+                fold_preds.append(pred)
+            except Exception as e:
+                print(f"  Warning: fold prediction failed for {target}: {e}")
+                break
+        else:
+            # All 5 folds succeeded
+            fold_preds = np.array(fold_preds)  # (5, n_molecules)
+            df[f'{target}_fold_mean'] = fold_preds.mean(axis=0)
+            df[f'{target}_fold_std'] = fold_preds.std(axis=0, ddof=1)
+
+            if conformal_quantiles and target in conformal_quantiles:
+                q = conformal_quantiles[target]
+                df[f'{target}_ci_lower'] = df[f'{target}_fold_mean'] - q
+                df[f'{target}_ci_upper'] = df[f'{target}_fold_mean'] + q
+
+    return df
 
 
 # ============================================================
