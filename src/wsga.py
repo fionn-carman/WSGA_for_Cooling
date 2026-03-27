@@ -1,9 +1,9 @@
 """
 WSGA - Weighted Sum Genetic Algorithm for Cooling Fluid Discovery
 
-Uses combined n-gram model trained on all available datasets for diverse
-initial population generation. Features hybrid elite selection, stagnation
-detection with adaptive restart, and size-dependent mutation weighting.
+Uses a GRU prior trained on the unified training corpus for initial
+population generation. Features hybrid elite selection, stagnation
+detection with population restart, and size-dependent mutation weighting.
 
 Optimizes molecular structures for thermophysical properties relevant to
 cooling fluids (thermal conductivity, heat capacity, viscosity, etc.)
@@ -78,9 +78,9 @@ parser.add_argument("--data_dir", type=str, default="../data", help="Data direct
 parser.add_argument("--model_dir", type=str, default="../models", help="Model directory")
 parser.add_argument("--training_data_dir", type=str, default="../training/data",
     help="Training data directory (for Mahalanobis OOD detection)")
-parser.add_argument("--Tau", type=float, default=0.05, help="Threshold for niching")
+parser.add_argument("--Tau", "--tau", type=float, default=0.05, help="Threshold for niching")
 parser.add_argument("--target", type=str, default="FOM1",
-    choices=["alpha", "FOM1", "FOM1_40", "FOM1_direct"],
+    choices=["FOM1", "FOM1_direct"],
     help="Target property to optimize"
 )
 parser.add_argument("--top_n", type=int, default=40, help="Number of top molecules to track and visualize")
@@ -101,8 +101,6 @@ parser.add_argument("--molprice_soft", type=float, default=3.0,
 parser.add_argument("--molprice_hard", type=float, default=6.0,
     help="MolPrice hard threshold (log USD/mmol) - zero fitness at/above this")
 parser.add_argument("--tournament_k", type=int, default=3, help="Tournament selection size (k)")
-parser.add_argument("--use_string_crossover", action="store_true",
-    help="Use old string-level crossover instead of bond-level crossover")
 parser.add_argument("--best_elite_ratio", type=float, default=0.3,
     help="Fraction of elites selected by raw FitnessScore (rest by NichedFitnessScore)")
 parser.add_argument("--stability_mode", type=str, default=None,
@@ -119,8 +117,6 @@ parser.add_argument("--pubchem_path", type=str, default=None,
     help="Path to PubChem CHO CSV file (required when --init_method pubchem)")
 parser.add_argument("--seed", type=int, default=None,
     help="Random seed for reproducibility")
-parser.add_argument("--fom1_mlp_model", type=str, default=None,
-    help="Path to MLP FOM1 model joblib. Overrides XGBoost fom1_40C with MLP predictions.")
 
 args = parser.parse_args()
 
@@ -159,20 +155,13 @@ STAGNATION_THRESHOLD = 0.01    # Minimum improvement required (in FOM1 units)
 STAGNATION_RESTART_RATIO = 0.3  # Replace 30% of elite with fresh molecules on restart
 MAX_STAGNATION_RESTARTS = 5     # Maximum number of restarts before giving up
 
-# Adaptive Mutation Rate Configuration
-MIN_MUTATION_RATE = 0.3         # Minimum mutation rate
-MAX_MUTATION_RATE = 0.95        # Maximum mutation rate during stagnation boost
-MUTATION_BOOST_FACTOR = 0.15    # How much to increase mutation rate per stagnation generation
-
 # Tracking
 TOP_N = args.top_n  # Number of top molecules to track per generation
 
 # Fitness Target
 TARGET = args.target
 TARGET_CONFIG = {
-    "alpha":       {"column": "alpha_40",  "maximize": True},
     "FOM1":        {"column": "fom1_40C",  "maximize": True},
-    "FOM1_40":     {"column": "FOM1_40",   "maximize": True},
     "FOM1_direct": {"column": "fom1_40C",  "maximize": True},
 }
 
@@ -184,7 +173,6 @@ MIN_FLASHPOINT = args.fp_threshold    # Min flash point (K)
 MAX_SCSCORE = args.sc_threshold       # Max synthetic complexity
 MAX_TOX21 = args.tox_threshold        # Max toxicity score
 USE_BIODEG_FILTER = not args.no_biodeg
-USE_STRING_CROSSOVER = args.use_string_crossover
 MOLPRICE_MODEL_PATH = args.molprice_model
 MOLPRICE_SOFT = args.molprice_soft
 MOLPRICE_HARD = args.molprice_hard
@@ -225,10 +213,6 @@ print(f"Stagnation window: {STAGNATION_WINDOW} generations")
 print(f"Stagnation threshold: {STAGNATION_THRESHOLD}")
 print(f"Restart ratio: {STAGNATION_RESTART_RATIO*100:.0f}%")
 print(f"Max restarts: {MAX_STAGNATION_RESTARTS}")
-print(f"--- Adaptive Mutation ---")
-print(f"Min mutation rate: {MIN_MUTATION_RATE}")
-print(f"Max mutation rate: {MAX_MUTATION_RATE}")
-print(f"Boost factor: {MUTATION_BOOST_FACTOR}")
 print(f"--- Validity Thresholds ---")
 print(f"MP threshold: {MP_THRESHOLD}°C")
 print(f"BP threshold: {BP_THRESHOLD}°C")
@@ -237,7 +221,7 @@ print(f"Flash point: {MIN_FLASHPOINT}K")
 print(f"SCScore max: {MAX_SCSCORE}")
 print(f"Tox21 max: {MAX_TOX21}")
 print(f"Biodeg filter: {USE_BIODEG_FILTER}")
-print(f"Crossover: {'string-level' if USE_STRING_CROSSOVER else 'bond-level (with string fallback)'}")
+print(f"Crossover: bond-level (with string fallback)")
 print(f"--- MolPrice ---")
 print(f"MolPrice prediction: always on (for logging)")
 if MOLPRICE_MODEL_PATH:
@@ -553,17 +537,6 @@ def main():
     else:
         print(f"WARNING: MolPrice model not found at {_mp_path} — MolPrice column will be empty")
 
-    # FOM1 MLP override model (optional)
-    fom1_mlp_data = None
-    if args.fom1_mlp_model:
-        if os.path.exists(args.fom1_mlp_model):
-            fom1_mlp_data = joblib.load(args.fom1_mlp_model)
-            print(f"Loaded FOM1 MLP model from {args.fom1_mlp_model} "
-                  f"({len(fom1_mlp_data['selected_features'])} features)")
-        else:
-            print(f"ERROR: FOM1 MLP model not found at {args.fom1_mlp_model}")
-            sys.exit(1)
-
     # Mahalanobis OOD params (precomputed per model at startup)
     print("\nPrecomputing Mahalanobis OOD parameters...")
     mahal_params = {}
@@ -666,7 +639,7 @@ def main():
         biodeg_model=biodeg_model,
         molprice_model=molprice_model,
         mahal_params=mahal_params,
-        fom1_mlp_data=fom1_mlp_data,
+        fom1_mlp_data=None,
         fold_ensembles=fold_ensembles,
         conformal_quantiles=conformal_quantiles,
     )
@@ -746,7 +719,6 @@ def main():
     generations_since_improvement = 0
     last_best_fitness = best_fitness_history[0]
     total_restarts = 0
-    current_mutation_rate = BASE_MUTATION_RATE
 
     # =============================
     # Genetic Algorithm Loop
@@ -755,7 +727,7 @@ def main():
     for gen in range(1, NUM_GENERATIONS + 1):
         print(f"\n{'='*50}")
         print(f"Generation {gen}/{NUM_GENERATIONS}")
-        print(f"Mutation rate: {current_mutation_rate:.3f} | Restarts: {total_restarts}")
+        print(f"Mutation rate: {BASE_MUTATION_RATE:.3f} | Restarts: {total_restarts}")
         print(f"{'='*50}")
 
         # ----- Generate Offspring via Crossover -----
@@ -767,10 +739,8 @@ def main():
                 p1 = k_way_tournament(elite_df, k=TOURNAMENT_K)
                 p2 = k_way_tournament(elite_df, k=TOURNAMENT_K)
 
-                child = None
-                if not USE_STRING_CROSSOVER:
-                    # Try bond-level crossover first
-                    child = crossover_mol_fragments(p1, p2, max_heavy_atoms=MAX_HEAVY_ATOMS)
+                # Try bond-level crossover first
+                child = crossover_mol_fragments(p1, p2, max_heavy_atoms=MAX_HEAVY_ATOMS)
 
                 if child is None:
                     # Fallback to string-level crossover
@@ -794,11 +764,11 @@ def main():
 
         offspring_df = pd.DataFrame({'SMILES': new_population_smiles})
 
-        # ----- Mutate Offspring (with adaptive mutation rate) -----
+        # ----- Mutate Offspring -----
         mutated_offspring_df, _ = apply_mutations_to_population(
             df=offspring_df,
             MUTATIONS=MUTATIONS,
-            MUTATION_RATE=current_mutation_rate,  # Use adaptive rate
+            MUTATION_RATE=BASE_MUTATION_RATE,
             NewAtoms=NewAtoms,
             BondTypes=BondTypes,
             fragments=fragments,
@@ -820,7 +790,7 @@ def main():
             biodeg_model=biodeg_model,
             molprice_model=molprice_model,
             mahal_params=mahal_params,
-            fom1_mlp_data=fom1_mlp_data,
+            fom1_mlp_data=None,
             fold_ensembles=fold_ensembles,
             conformal_quantiles=conformal_quantiles,
         )
@@ -920,19 +890,12 @@ def main():
             # Improvement found - reset counters
             generations_since_improvement = 0
             last_best_fitness = best_raw_fitness
-            current_mutation_rate = BASE_MUTATION_RATE  # Reset to base rate
             print(f"  ✓ Improvement! New best: {best_raw_fitness:.4f}")
         else:
             # No improvement
             generations_since_improvement += 1
             print(f"  ✗ No improvement for {generations_since_improvement} generations")
-            
-            # Adaptive mutation rate - increase during stagnation
-            current_mutation_rate = min(
-                MAX_MUTATION_RATE,
-                BASE_MUTATION_RATE + (generations_since_improvement * MUTATION_BOOST_FACTOR)
-            )
-            
+
             # Check if we need a restart
             if generations_since_improvement >= STAGNATION_WINDOW:
                 if total_restarts < MAX_STAGNATION_RESTARTS:
@@ -948,9 +911,19 @@ def main():
                     # Keep top performers by raw fitness
                     elite_df_kept = elite_df.nlargest(n_keep, 'FitnessScore')
                     
-                    # Generate fresh molecules
+                    # Generate fresh molecules using same method as init
                     print(f"Generating {n_fresh} fresh molecules...")
-                    if args.init_method == "pubchem":
+                    if args.init_method == "gru":
+                        fresh_df = generate_gru_population(
+                            n=n_fresh * 3,
+                            prior_path=args.gru_prior or os.path.join(MODEL_DIR, "init_corpus", "gru_prior.pt"),
+                            vocab_path=args.gru_vocab or os.path.join(MODEL_DIR, "init_corpus", "vocabulary.json"),
+                            max_heavy_atoms=MAX_HEAVY_ATOMS,
+                            min_heavy_atoms=MIN_HEAVY_ATOMS,
+                            max_carbons=MAX_CARBONS,
+                            max_oxygens=MAX_OXYGENS,
+                        )
+                    elif args.init_method == "pubchem":
                         fresh_df = sample_pubchem_population(
                             n=n_fresh * 3,
                             pubchem_path=args.pubchem_path,
@@ -985,7 +958,7 @@ def main():
                             biodeg_model=biodeg_model,
                             molprice_model=molprice_model,
                             mahal_params=mahal_params,
-                            fom1_mlp_data=fom1_mlp_data,
+                            fom1_mlp_data=None,
                             fold_ensembles=fold_ensembles,
                             conformal_quantiles=conformal_quantiles,
                         )
@@ -1031,9 +1004,8 @@ def main():
                     else:
                         print("Warning: Could not generate fresh molecules for restart")
                     
-                    # Reset stagnation counter but keep elevated mutation rate for a bit
+                    # Reset stagnation counter
                     generations_since_improvement = 0
-                    current_mutation_rate = MAX_MUTATION_RATE  # Keep high after restart
                 else:
                     print(f"\n⚠ Max restarts ({MAX_STAGNATION_RESTARTS}) reached - continuing with current population")
 
