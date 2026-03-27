@@ -108,6 +108,7 @@ UNITS = {
     "mp": "Melting point / °C",
     "dc": "Dielectric constant",
     "dc_cho667": "Dielectric constant",
+    "dc_cho667_nolog": "Dielectric constant",
 }
 
 MODELS = {
@@ -124,6 +125,7 @@ MODELS = {
     "mp":        {"csv": "constraints/MP-Measured_cleaned.csv",   "col_40": "MP-Measured", "log": False},
     "dc":        {"csv": "constraints/DC_exp_cleaned.csv",        "col_40": "DC_exp",      "log": True},
     "dc_cho667": {"csv": "constraints/DC_exp_cleaned_cho667.csv", "col_40": "DC_exp",      "log": True},
+    "dc_cho667_nolog": {"csv": "constraints/DC_exp_cleaned_cho667.csv", "col_40": "DC_exp", "log": False},
 }
 
 SCRIPT_DIR = Path(__file__).resolve().parent
