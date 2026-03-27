@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -N train_gru_prior
-#PBS -l walltime=04:00:00
+#PBS -l walltime=12:00:00
 #PBS -l select=1:ncpus=4:mem=32gb
 #PBS -o /dev/null
 #PBS -e /dev/null
