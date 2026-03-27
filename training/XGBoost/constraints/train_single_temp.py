@@ -276,7 +276,19 @@ def optuna_hp_tuning(X: np.ndarray, y: np.ndarray, n_trials: int = 100,
     logger.info("      Optuna: %d trials (%d pruned), best R2=%.4f",
                 len(study.trials), n_pruned, study.best_value)
 
-    return study.best_params
+    # Build convergence history (completed trials only)
+    trial_history = []
+    best_so_far = -np.inf
+    for t in study.trials:
+        if t.state == optuna.trial.TrialState.COMPLETE:
+            best_so_far = max(best_so_far, t.value)
+            trial_history.append({
+                "trial": t.number,
+                "value": t.value,
+                "best_so_far": best_so_far,
+            })
+
+    return study.best_params, trial_history
 
 
 # ============================================================
@@ -385,6 +397,30 @@ def save_shap_plots(shap_values, feature_names, X_display, out_dir,
     plt.close("all")
 
 
+def save_optuna_convergence_plot(out_dir, fig_dir, n_folds=5):
+    """Plot Optuna convergence curves across all folds."""
+    fig, ax = plt.subplots(figsize=(10, 6), dpi=150)
+    colors = plt.cm.tab10.colors
+
+    for fold_i in range(n_folds):
+        hist_path = out_dir / f"fold{fold_i}_optuna_history.csv"
+        if not hist_path.exists():
+            continue
+        hist = pd.read_csv(hist_path)
+        ax.plot(range(len(hist)), hist["best_so_far"],
+                color=colors[fold_i], lw=1.5, label=f"Fold {fold_i}")
+        ax.scatter(range(len(hist)), hist["value"],
+                   color=colors[fold_i], alpha=0.2, s=10, zorder=1)
+
+    ax.set_xlabel("Completed trial")
+    ax.set_ylabel("Inner CV $R^2$")
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    fig.savefig(fig_dir / "optuna_convergence.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    logger.info("    Saved convergence plot")
+
+
 # ============================================================
 # Per-property training pipeline
 # ============================================================
@@ -447,10 +483,14 @@ def train_property(prop_name: str, prop_config: dict, desc_df: pd.DataFrame,
         X_test_sel = np.nan_to_num(X_test[:, feat_idx], nan=0.0, posinf=0.0, neginf=0.0)
 
         # 4b. Optuna HP tuning (train only, inner CV)
-        best_params = optuna_hp_tuning(
+        best_params, trial_history = optuna_hp_tuning(
             X_train_sel, y_train,
             n_trials=n_trials, timeout=timeout, seed=fold_i,
         )
+
+        # Save Optuna trial history for convergence analysis
+        hist_df = pd.DataFrame(trial_history)
+        hist_df.to_csv(out_dir / f"fold{fold_i}_optuna_history.csv", index=False)
 
         # 4c. Train + predict
         model = XGBRegressor(
@@ -598,6 +638,7 @@ def train_property(prop_name: str, prop_config: dict, desc_df: pd.DataFrame,
     save_parity_plot(y_true_real[valid], y_pred_real[valid], fig_dir, prop_name)
     save_diagnostics_plot(y_true_real[valid], y_pred_real[valid], fig_dir, prop_name)
     save_shap_plots(shap_full, all_features_union, X_display_full, fig_dir)
+    save_optuna_convergence_plot(out_dir, fig_dir)
     logger.info("    Plots saved to %s", fig_dir)
 
     # --- Overall CV metrics ---
