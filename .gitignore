@@ -1,5 +1,6 @@
 # Archive (old models, data, experiments)
 archive/
+scripts_archive/
 
 # GA run outputs
 outputs/

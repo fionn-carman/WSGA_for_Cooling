@@ -136,7 +136,8 @@ python3 ../src/wsga.py \
     --tournament_k $K \
     --Tau $TAU \
     --num_generations $NUM_GENERATIONS \
-    --fp_threshold 373 \
+    --no_biodeg \
+    --fp_threshold 398 \
     --bp_threshold 70 \
     --dc_threshold 8 \
     --mp_threshold -30 \
