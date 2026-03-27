@@ -1,7 +1,7 @@
 #!/bin/bash
 #PBS -N train_gru_prior
-#PBS -l walltime=02:00:00
-#PBS -l select=1:ncpus=4:mem=32gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=04:00:00
+#PBS -l select=1:ncpus=4:mem=32gb
 #PBS -o /dev/null
 #PBS -e /dev/null
 
@@ -39,7 +39,7 @@ python3 ../src/train_gru_prior.py \
     --epochs 30 \
     --batch_size 512 \
     --lr 1e-3 \
-    --device cuda \
+    --device cpu \
     2>&1 | tee "$log_file"
 
 echo "" >> "$log_file"
