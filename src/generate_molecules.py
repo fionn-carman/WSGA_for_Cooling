@@ -344,3 +344,93 @@ def sample_pubchem_population(
         )
 
     return pd.DataFrame({"SMILES": population_smiles})
+
+
+# ---------------------------
+# GRU prior sampling
+# ---------------------------
+
+def generate_gru_population(
+    n,
+    prior_path,
+    vocab_path,
+    max_heavy_atoms,
+    min_heavy_atoms,
+    max_carbons,
+    max_oxygens,
+    temperature=1.0,
+    batch_size=512,
+):
+    """
+    Generate initial population using a pre-trained GRU prior.
+
+    Loads a trained GRU model and vocabulary, samples SMILES in batches,
+    and filters to CHO molecules matching the atom count constraints.
+
+    Args:
+        n: number of unique valid molecules to collect
+        prior_path: path to gru_prior.pt state dict
+        vocab_path: path to vocabulary.json
+        max_heavy_atoms: maximum heavy atom count
+        min_heavy_atoms: minimum heavy atom count
+        max_carbons: maximum carbon count
+        max_oxygens: maximum oxygen count
+        temperature: sampling temperature (1.0 = standard)
+        batch_size: number of SMILES to sample per batch
+    """
+    import sys
+    import torch
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'reinvent'))
+    from reinvent.vocabulary import SMILESVocabulary
+    from reinvent.model import GRUModel
+
+    # Load model
+    vocab = SMILESVocabulary.load(vocab_path)
+    model = GRUModel(len(vocab))
+    model.load_state_dict(torch.load(prior_path, map_location="cpu", weights_only=True))
+    model.eval()
+    print(f"Loaded GRU prior from {prior_path} (vocab={len(vocab)})")
+
+    population_smiles = []
+    seen = set()
+    attempts = 0
+
+    while len(population_smiles) < n:
+        with torch.no_grad():
+            batch_smiles, _ = model.sample(vocab, batch_size=batch_size,
+                                           temperature=temperature)
+        for smi in batch_smiles:
+            attempts += 1
+            mol = Chem.MolFromSmiles(smi)
+            if mol is None:
+                continue
+
+            if not is_CO_only(mol):
+                continue
+
+            canonical = Chem.MolToSmiles(mol, canonical=True)
+            if canonical in seen:
+                continue
+
+            heavy_atoms = mol.GetNumHeavyAtoms()
+            if not (min_heavy_atoms <= heavy_atoms <= max_heavy_atoms):
+                continue
+
+            counts = atom_counts(mol)
+            if counts["C"] > max_carbons or counts["O"] > max_oxygens:
+                continue
+
+            if not has_valid_rings(mol):
+                continue
+
+            population_smiles.append(canonical)
+            seen.add(canonical)
+
+            if len(population_smiles) >= n:
+                break
+
+    yield_pct = (len(population_smiles) / attempts) * 100 if attempts > 0 else 0
+    print(f"GRU generated {len(population_smiles)}/{n} molecules "
+          f"from {attempts} samples (yield={yield_pct:.1f}%)")
+
+    return pd.DataFrame({"SMILES": population_smiles})

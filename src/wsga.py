@@ -40,7 +40,7 @@ from wsga_helper import (
 from evaluation import get_scscore_cached, strict_canonicalize_smiles
 from fragment_utils import prepare_fragments, crossover_fragments, crossover_mol_fragments
 from SCScorer import SCScorer
-from generate_molecules import generate_initial_population, load_combined_training_data, sample_pubchem_population
+from generate_molecules import generate_initial_population, load_combined_training_data, sample_pubchem_population, generate_gru_population
 
 
 # =============================
@@ -108,9 +108,13 @@ parser.add_argument("--best_elite_ratio", type=float, default=0.3,
 parser.add_argument("--stability_mode", type=str, default=None,
     choices=["strict"],
     help="'strict': bans alkenes, glymes, limits ethers/esters/oxygens")
-parser.add_argument("--init_method", type=str, default="ngram",
-    choices=["ngram", "pubchem"],
-    help="Initial population method: 'ngram' (default) or 'pubchem' (sample from PubChem CSV)")
+parser.add_argument("--init_method", type=str, default="gru",
+    choices=["gru", "ngram", "pubchem"],
+    help="Initial population method: 'gru' (default), 'ngram', or 'pubchem'")
+parser.add_argument("--gru_prior", type=str, default=None,
+    help="Path to pre-trained GRU prior.pt (default: models/init_corpus/gru_prior.pt)")
+parser.add_argument("--gru_vocab", type=str, default=None,
+    help="Path to GRU vocabulary.json (default: models/init_corpus/vocabulary.json)")
 parser.add_argument("--pubchem_path", type=str, default=None,
     help="Path to PubChem CHO CSV file (required when --init_method pubchem)")
 parser.add_argument("--seed", type=int, default=None,
@@ -592,7 +596,21 @@ def main():
     # ----- Initialize Population -----
     print("Generating initial population...")
 
-    if args.init_method == "pubchem":
+    if args.init_method == "gru":
+        prior_path = args.gru_prior or os.path.join(MODEL_DIR, "init_corpus", "gru_prior.pt")
+        vocab_path = args.gru_vocab or os.path.join(MODEL_DIR, "init_corpus", "vocabulary.json")
+        print(f"Generating initial population via GRU prior: {prior_path}")
+        df = generate_gru_population(
+            n=INITIAL_POPULATION_SIZE,
+            prior_path=prior_path,
+            vocab_path=vocab_path,
+            max_heavy_atoms=MAX_HEAVY_ATOMS,
+            min_heavy_atoms=MIN_HEAVY_ATOMS,
+            max_carbons=MAX_CARBONS,
+            max_oxygens=MAX_OXYGENS,
+        )
+        training_smiles = load_combined_training_data(DATA_DIR)
+    elif args.init_method == "pubchem":
         print(f"Sampling from PubChem corpus: {args.pubchem_path}")
         df = sample_pubchem_population(
             n=INITIAL_POPULATION_SIZE,
