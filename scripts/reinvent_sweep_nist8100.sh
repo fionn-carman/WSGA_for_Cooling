@@ -171,7 +171,8 @@ echo "========================================" >> "$log_file"
 # ==============================
 python3 ../src/reinvent/run_reinvent.py \
     --target $TARGET \
-    --pretrain_epochs $PRETRAIN_EPOCHS \
+    --prior_path ../models/init_corpus/gru_prior.pt \
+    --vocab_path ../models/init_corpus/vocabulary.json \
     --rl_steps $RL_STEPS \
     --batch_size $BATCH_SIZE \
     --sigma $SIGMA \

@@ -130,19 +130,12 @@ SC_THRESHOLD=3
 TOX_THRESHOLD=3
 
 # ==============================
-# Prior reuse (Phase 1 is sigma-independent)
+# Prior: use pre-trained 5x GRU
 # ==============================
-PRIOR_DIR="../outputs/reinvent_diversity_sweep_nist8100/${LEVEL}_${CATEGORY}_seed${SEED}"
-PRIOR_PT="${PRIOR_DIR}/prior.pt"
-VOCAB_JSON="${PRIOR_DIR}/vocabulary.json"
-
-PRIOR_FLAGS=""
-if [ -f "$PRIOR_PT" ] && [ -f "$VOCAB_JSON" ]; then
-    PRIOR_FLAGS="--prior_path $PRIOR_PT --vocab_path $VOCAB_JSON"
-    PRIOR_STATUS="reused from $PRIOR_DIR"
-else
-    PRIOR_STATUS="training from scratch (prior not found at $PRIOR_DIR)"
-fi
+PRIOR_PT="../models/init_corpus/gru_prior.pt"
+VOCAB_JSON="../models/init_corpus/vocabulary.json"
+PRIOR_FLAGS="--prior_path $PRIOR_PT --vocab_path $VOCAB_JSON"
+PRIOR_STATUS="5x GRU prior from models/init_corpus/"
 
 # ==============================
 # Setup output directory
