@@ -28,6 +28,7 @@ CATEGORY_ORDER = ["bio_stable", "bio_unstable", "nonbio_stable", "nonbio_unstabl
 
 KEEP_COLUMNS = [
     "SMILES", "fom1_40C", "fp", "MolPrice", "FitnessScore", "MolPrice_Penalty",
+    "OOD_any", "OOD_count",
 ]
 
 
@@ -46,8 +47,11 @@ def parse_sweep_dir(dirname):
 
 
 def process_run(run_path, level, category, seed):
-    """Read all_evaluated_molecules.csv, filter, deduplicate, return compact df."""
+    """Read all_evaluated_molecules.csv (or top_n_tracking.csv fallback),
+    filter, deduplicate, return compact df."""
     csv_path = os.path.join(run_path, "all_evaluated_molecules.csv")
+    if not os.path.exists(csv_path):
+        csv_path = os.path.join(run_path, "top_n_tracking.csv")
     if not os.path.exists(csv_path):
         return None
 
