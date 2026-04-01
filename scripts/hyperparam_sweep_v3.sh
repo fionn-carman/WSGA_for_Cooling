@@ -138,8 +138,8 @@ python3 ../src/wsga.py \
     --num_generations $NUM_GENERATIONS \
     --no_biodeg \
     --fp_threshold 398 \
-    --bp_threshold 70 \
-    --dc_threshold 8 \
+    --bp_threshold 100 \
+    --dc_threshold 7 \
     --mp_threshold -30 \
     --sc_threshold 3 \
     --tox_threshold 3 \

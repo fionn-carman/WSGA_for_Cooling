@@ -657,7 +657,8 @@ def main():
     )
 
     evaluated_df = compute_fitness(evaluated_df, TARGET, TARGET_CONFIG)
-    evaluated_df = apply_molprice_penalty(evaluated_df, soft_threshold=MOLPRICE_SOFT, hard_threshold=MOLPRICE_HARD)
+    if MOLPRICE_MODEL_PATH:
+        evaluated_df = apply_molprice_penalty(evaluated_df, soft_threshold=MOLPRICE_SOFT, hard_threshold=MOLPRICE_HARD)
     evaluated_df = apply_niching(evaluated_df)
 
     # Select initial GA population
@@ -808,7 +809,8 @@ def main():
         )
 
         evaluated_offspring_df = compute_fitness(evaluated_offspring_df, TARGET, TARGET_CONFIG)
-        evaluated_offspring_df = apply_molprice_penalty(evaluated_offspring_df, soft_threshold=MOLPRICE_SOFT, hard_threshold=MOLPRICE_HARD)
+        if MOLPRICE_MODEL_PATH:
+            evaluated_offspring_df = apply_molprice_penalty(evaluated_offspring_df, soft_threshold=MOLPRICE_SOFT, hard_threshold=MOLPRICE_HARD)
         # Note: Don't apply niching here - we'll do it on the combined population
 
         # ----- Update Seen SMILES -----
@@ -974,7 +976,8 @@ def main():
                             stability_mode=STABILITY_MODE
                         )
                         fresh_evaluated = compute_fitness(fresh_evaluated, TARGET, TARGET_CONFIG)
-                        fresh_evaluated = apply_molprice_penalty(fresh_evaluated, soft_threshold=MOLPRICE_SOFT, hard_threshold=MOLPRICE_HARD)
+                        if MOLPRICE_MODEL_PATH:
+                            fresh_evaluated = apply_molprice_penalty(fresh_evaluated, soft_threshold=MOLPRICE_SOFT, hard_threshold=MOLPRICE_HARD)
                         
                         # Add to seen smiles
                         fresh_evaluated["CanonicalSMILES"] = fresh_evaluated["SMILES"].apply(strict_canonicalize_smiles)
