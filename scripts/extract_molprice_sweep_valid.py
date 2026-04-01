@@ -28,6 +28,9 @@ CATEGORY_ORDER = ["bio_stable", "bio_unstable", "nonbio_stable", "nonbio_unstabl
 
 KEEP_COLUMNS = [
     "SMILES", "fom1_40C", "fp", "MolPrice", "FitnessScore", "MolPrice_Penalty",
+    "OOD_bp", "OOD_mp", "OOD_fp", "OOD_dc",
+    "OOD_density_40C", "OOD_viscosity_40C", "OOD_tc_40C",
+    "OOD_cpsat_40C", "OOD_beta_40C", "OOD_fom1_40C",
     "OOD_any", "OOD_count",
 ]
 
