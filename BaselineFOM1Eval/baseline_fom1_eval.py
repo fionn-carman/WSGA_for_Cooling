@@ -59,7 +59,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from wsga_helper import (
     load_regression_models_with_aux,
-    load_tox21_models,
+    load_tox21_predictor,
     load_biodeg_model,
     evaluate_molecules,
 )
@@ -70,9 +70,11 @@ from SCScorer import SCScorer
 # Configuration
 # ======================================================================
 
-# Safety/constraint models to load (these remain in models/ after cleanup)
-CONSTRAINT_TARGETS = [
-    "BP-Measured", "MP-Measured", "DC_exp", "flashpoint",
+# All models (Mordred+Optuna pipeline) — need thermo models for derived properties
+ALL_TARGETS = [
+    "bp", "mp", "dc", "fp",
+    "density_40C", "viscosity_40C", "tc_40C", "cpsat_40C", "beta_40C",
+    "fom1_40C",
 ]
 
 # FP/MP sweep grids (flash point in degC to match old convention)
@@ -104,7 +106,7 @@ def load_nist_dataset(nist_dir):
     print(f"  FOM1 dataset: {len(df)} molecules")
 
     # Rename FOM1 column for consistency
-    df = df.rename(columns={"FOM1_improved_40C": "FOM1_exp_40"})
+    df = df.rename(columns={"fom1_40C": "FOM1_exp_40"})
 
     # Keep only SMILES, name, FOM1, and the component properties
     keep_cols = ["SMILES", "name", "FOM1_exp_40",
@@ -183,7 +185,7 @@ def compute_fom1_100c(df):
 
 def apply_fp_mp_filter(df, fp_k, mp_c, use_biodeg):
     """Filter by flash point (K) and melting point (degC) + biodeg."""
-    mask = (df["flashpoint"] >= fp_k) & (df["MP-Measured"] <= mp_c)
+    mask = (df["fp"] >= fp_k) & (df["mp"] <= mp_c)
     if use_biodeg:
         mask = mask & (df["Biodegradable"] == True)
     return df[mask]
@@ -192,10 +194,10 @@ def apply_fp_mp_filter(df, fp_k, mp_c, use_biodeg):
 def apply_all_constraints(df, fp_k, mp_c, use_biodeg):
     """Filter by all constraints: FP, MP, BP, DC, Tox + biodeg."""
     mask = (
-        (df["flashpoint"] >= fp_k) &
-        (df["MP-Measured"] <= mp_c) &
-        (df["BP-Measured"] >= BP_THRESHOLD) &
-        (df["DC_exp"] <= DC_THRESHOLD) &
+        (df["fp"] >= fp_k) &
+        (df["mp"] <= mp_c) &
+        (df["bp"] >= BP_THRESHOLD) &
+        (df["dc"] <= DC_THRESHOLD) &
         (df["Tox21_Score"] <= TOX_THRESHOLD)
     )
     if use_biodeg:
@@ -369,19 +371,19 @@ def print_top_molecules(df, filter_func, out_dir, use_biodeg, fp_k, mp_c, n_top=
         if len(smi) > 42:
             smi = smi[:39] + "..."
         bio = "Y" if mol.get("Biodegradable", False) else "N"
-        fp_display = mol.get("flashpoint", np.nan) - 273.15  # K to C
+        fp_display = mol.get("fp", np.nan) - 273.15  # K to C
         print(
             f"  {i:<5} {smi:<45} "
             f"{mol.get('FOM1_exp_avg', np.nan):>10.2f} "
             f"{mol.get('FOM1_exp_40', np.nan):>10.2f} "
-            f"{mol.get('MP-Measured', np.nan):>7.1f} "
+            f"{mol.get('mp', np.nan):>7.1f} "
             f"{fp_display:>8.1f} "
             f"{bio:>4}"
         )
 
     # Save CSV
     save_cols = ["SMILES", "name", "FOM1_exp_avg", "FOM1_exp_40", "FOM1_exp_100",
-                 "MP-Measured", "flashpoint", "BP-Measured", "DC_exp",
+                 "mp", "fp", "bp", "dc",
                  "Tox21_Score", "Biodegradable"]
     save_cols = [c for c in save_cols if c in valid.columns]
     out_path = os.path.join(out_dir, f"top_molecules_{tag}.csv")
@@ -428,7 +430,7 @@ def main(out_dir, nist_dir, model_dir):
 
     # Check which models are available
     available_targets = []
-    for target in CONSTRAINT_TARGETS:
+    for target in ALL_TARGETS:
         model_path = os.path.join(model_dir, target, "model", "xgb_model.joblib")
         if os.path.exists(model_path):
             available_targets.append(target)
@@ -453,12 +455,12 @@ def main(out_dir, nist_dir, model_dir):
     tox21_models = None
     if os.path.isdir(tox21_dir):
         try:
-            tox21_models = load_tox21_models(tox21_dir)
+            tox21_models = load_tox21_predictor(tox21_dir)
         except Exception as e:
             print(f"  WARNING: Could not load Tox21 models: {e}")
 
     biodeg_model = None
-    biodeg_dir = os.path.join(model_dir, "biodegradability")
+    biodeg_dir = os.path.join(model_dir, "biodeg")
     if os.path.isdir(biodeg_dir):
         try:
             biodeg_model = load_biodeg_model(biodeg_dir)
@@ -477,8 +479,8 @@ def main(out_dir, nist_dir, model_dir):
     print(f"  {len(pred_df)} molecules evaluated")
 
     # Merge predicted constraint columns
-    constraint_cols = ["SMILES", "MP-Measured", "flashpoint", "BP-Measured",
-                       "DC_exp", "Tox21_Score", "Biodegradable", "SCScore"]
+    constraint_cols = ["SMILES", "mp", "fp", "bp",
+                       "dc", "Tox21_Score", "Biodegradable", "SCScore"]
     constraint_cols = [c for c in constraint_cols if c in pred_df.columns]
     df = df.merge(pred_df[constraint_cols], on="SMILES", how="left")
 
@@ -487,12 +489,12 @@ def main(out_dir, nist_dir, model_dir):
 
     n_bio = (df.get("Biodegradable", pd.Series(dtype=bool)) == True).sum()
     print(f"  Biodegradable: {n_bio} / {len(df)}")
-    if "flashpoint" in df.columns:
-        fp = df["flashpoint"].dropna()
+    if "fp" in df.columns:
+        fp = df["fp"].dropna()
         print(f"  FP range: {fp.min():.1f} \u2013 {fp.max():.1f} K "
               f"({fp.min()-273.15:.0f} \u2013 {fp.max()-273.15:.0f} \u00b0C)")
-    if "MP-Measured" in df.columns:
-        mp = df["MP-Measured"].dropna()
+    if "mp" in df.columns:
+        mp = df["mp"].dropna()
         print(f"  MP range: {mp.min():.1f} \u2013 {mp.max():.1f} \u00b0C")
 
     # ------------------------------------------------------------------
@@ -504,7 +506,7 @@ def main(out_dir, nist_dir, model_dir):
     # ------------------------------------------------------------------
     # 5. FP/MP constraint heatmaps (FP + MP only)
     # ------------------------------------------------------------------
-    if "flashpoint" in df.columns and "MP-Measured" in df.columns:
+    if "fp" in df.columns and "mp" in df.columns:
         print(f"\nFP/MP heatmaps (FP + MP constraints only)...")
         results_simple = _build_heatmap_grids(df, apply_fp_mp_filter)
         plot_2x2_heatmaps(results_simple, out_dir, "heatmap_fpmp.png")
@@ -512,7 +514,7 @@ def main(out_dir, nist_dir, model_dir):
         # ------------------------------------------------------------------
         # 6. FP/MP constraint heatmaps (all constraints)
         # ------------------------------------------------------------------
-        if all(c in df.columns for c in ["BP-Measured", "DC_exp", "Tox21_Score"]):
+        if all(c in df.columns for c in ["bp", "dc", "Tox21_Score"]):
             print(f"\nFP/MP heatmaps (all constraints: FP, MP, BP>={BP_THRESHOLD}, "
                   f"DC<={DC_THRESHOLD}, Tox<={TOX_THRESHOLD})...")
             results_all = _build_heatmap_grids(df, apply_all_constraints)
@@ -531,7 +533,7 @@ def main(out_dir, nist_dir, model_dir):
             print_top_molecules(df, apply_fp_mp_filter, out_dir, use_biodeg,
                                 default_fp, default_mp)
 
-        if all(c in df.columns for c in ["BP-Measured", "DC_exp", "Tox21_Score"]):
+        if all(c in df.columns for c in ["bp", "dc", "Tox21_Score"]):
             print(f"\n--- Top molecules (all constraints) ---")
             for use_biodeg in [True, False]:
                 print_top_molecules(df, apply_all_constraints, out_dir, use_biodeg,

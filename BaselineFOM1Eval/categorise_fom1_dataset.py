@@ -1,13 +1,14 @@
 """
-Categorise FOM1 dataset molecules into 4 categories for the stability sweep.
+Categorise FOM1 dataset molecules into 2 categories + excluded.
 
 Takes the baseline evaluation output (with pre-computed constraint properties),
-predicts SCScore and MolPrice, applies constraints matching the GA's filters,
-and classifies each molecule.
+predicts SCScore and MolPrice, applies constraints matching the GA's filters
+(including always-on reactive group bans), and classifies each molecule.
 
-Categories (2 axes):
-  - Biodegradable vs no filter
-  - Stable (passes STABILITY_SMARTS + n_ether<=1) vs no additional filter
+Categories:
+  - bio:      passes base constraints AND biodegradable
+  - nonbio:   passes base constraints AND NOT biodegradable
+  - excluded: fails base constraints
 
 Output: output/fom1_dataset_categories.csv
 
@@ -31,12 +32,7 @@ if _src not in sys.path:
 from rdkit import Chem, RDLogger
 RDLogger.DisableLog('rdApp.error')
 
-from wsga_helper import (
-    has_invalid_fragments,
-    count_ether_linkages,
-    count_ester_groups,
-    STABILITY_SMARTS,
-)
+from wsga_helper import has_invalid_fragments
 from evaluation import get_scscore_cached
 from SCScorer import SCScorer
 
@@ -57,35 +53,9 @@ def predict_molprice(smiles_list, molprice_path):
     return mp_model.predict_batch(smiles_list)
 
 
-def check_stability(smiles):
-    """Check if a molecule passes stability constraints.
-
-    Returns True if the molecule is 'stable' (no alkenes, no polyethers,
-    no aldehydes, no carboxylic acids, no carbonates, n_ether<=1,
-    n_ester<=2, n_oxygen<=4).
-    """
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        return False
-
-    for name, pattern in STABILITY_SMARTS.items():
-        if pattern is not None and mol.HasSubstructMatch(pattern):
-            return False
-
-    if count_ether_linkages(mol) > 1:
-        return False
-    if count_ester_groups(mol) > 2:
-        return False
-    n_oxygen = sum(1 for a in mol.GetAtoms() if a.GetAtomicNum() == 8)
-    if n_oxygen > 4:
-        return False
-
-    return True
-
-
 def main():
     parser = argparse.ArgumentParser(
-        description="Categorise FOM1 dataset into 4 stability/biodeg categories")
+        description="Categorise FOM1 dataset into bio/nonbio/excluded categories")
     parser.add_argument("--baseline_csv", type=str,
                         default="output/baseline_fom1_results.csv")
     parser.add_argument("--model_dir", type=str, default="../models")
@@ -96,7 +66,7 @@ def main():
     # Constraint thresholds (matching sweep defaults)
     parser.add_argument("--mp_threshold", type=float, default=-30)
     parser.add_argument("--bp_threshold", type=float, default=100)
-    parser.add_argument("--fp_threshold", type=float, default=373.15)
+    parser.add_argument("--fp_threshold", type=float, default=398.15)
     parser.add_argument("--dc_threshold", type=float, default=7)
     parser.add_argument("--tox_threshold", type=float, default=3)
     parser.add_argument("--sc_threshold", type=float, default=3)
@@ -142,14 +112,14 @@ def main():
 
     # Build constraint mask with available columns
     constraint_parts = [~df["has_banned_fragments"]]
-    if "MP-Measured" in df.columns:
-        constraint_parts.append(df["MP-Measured"] < args.mp_threshold)
-    if "BP-Measured" in df.columns:
-        constraint_parts.append(df["BP-Measured"] >= args.bp_threshold)
-    if "flashpoint" in df.columns:
-        constraint_parts.append(df["flashpoint"] >= args.fp_threshold)
-    if "DC_exp" in df.columns:
-        constraint_parts.append(df["DC_exp"] <= args.dc_threshold)
+    if "mp" in df.columns:
+        constraint_parts.append(df["mp"] < args.mp_threshold)
+    if "bp" in df.columns:
+        constraint_parts.append(df["bp"] >= args.bp_threshold)
+    if "fp" in df.columns:
+        constraint_parts.append(df["fp"] >= args.fp_threshold)
+    if "dc" in df.columns:
+        constraint_parts.append(df["dc"] <= args.dc_threshold)
     if "Tox21_Score" in df.columns:
         constraint_parts.append(df["Tox21_Score"] <= args.tox_threshold)
     if "SCScore" in df.columns:
@@ -164,18 +134,18 @@ def main():
     print(f"  Pass all base constraints: {n_pass}/{n_total}")
 
     # Per-constraint breakdown
-    if "MP-Measured" in df.columns:
+    if "mp" in df.columns:
         print(f"    MP < {args.mp_threshold}: "
-              f"{(df['MP-Measured'] < args.mp_threshold).sum()}")
-    if "BP-Measured" in df.columns:
+              f"{(df['mp'] < args.mp_threshold).sum()}")
+    if "bp" in df.columns:
         print(f"    BP >= {args.bp_threshold}: "
-              f"{(df['BP-Measured'] >= args.bp_threshold).sum()}")
-    if "flashpoint" in df.columns:
+              f"{(df['bp'] >= args.bp_threshold).sum()}")
+    if "fp" in df.columns:
         print(f"    FP >= {args.fp_threshold}: "
-              f"{(df['flashpoint'] >= args.fp_threshold).sum()}")
-    if "DC_exp" in df.columns:
+              f"{(df['fp'] >= args.fp_threshold).sum()}")
+    if "dc" in df.columns:
         print(f"    DC <= {args.dc_threshold}: "
-              f"{(df['DC_exp'] <= args.dc_threshold).sum()}")
+              f"{(df['dc'] <= args.dc_threshold).sum()}")
     if "Tox21_Score" in df.columns:
         print(f"    Tox21 <= {args.tox_threshold}: "
               f"{(df['Tox21_Score'] <= args.tox_threshold).sum()}")
@@ -185,19 +155,14 @@ def main():
     print(f"    No banned fragments: {(~df['has_banned_fragments']).sum()}")
 
     # ------------------------------------------------------------------
-    # 5. Classify stability and biodegradability
+    # 5. Classify biodegradability
     # ------------------------------------------------------------------
-    print("\nClassifying stability...")
-    df["is_stable"] = df["SMILES"].apply(check_stability)
-    n_stable = df["is_stable"].sum()
-    print(f"  Stable: {n_stable}/{n_total}")
-
     if "Biodegradable" in df.columns:
         df["is_biodegradable"] = df["Biodegradable"].astype(bool)
     else:
         df["is_biodegradable"] = False
     n_biodeg = df["is_biodegradable"].sum()
-    print(f"  Biodegradable: {n_biodeg}/{n_total}")
+    print(f"\n  Biodegradable: {n_biodeg}/{n_total}")
 
     # ------------------------------------------------------------------
     # 6. Assign categories (for molecules passing base constraints)
@@ -205,16 +170,9 @@ def main():
     def _assign_category(row):
         if not row["passes_base_constraints"]:
             return "excluded"
-        bio = row["is_biodegradable"]
-        stable = row["is_stable"]
-        if bio and stable:
-            return "bio_stable"
-        elif bio and not stable:
-            return "bio_unstable"
-        elif not bio and stable:
-            return "nonbio_stable"
-        else:
-            return "nonbio_unstable"
+        if row["is_biodegradable"]:
+            return "bio"
+        return "nonbio"
 
     df["category"] = df.apply(_assign_category, axis=1)
 
@@ -225,8 +183,7 @@ def main():
     print(f"  CATEGORY SUMMARY (molecules passing base constraints)")
     print(f"{'='*60}")
 
-    cats = ["bio_stable", "bio_unstable", "nonbio_stable", "nonbio_unstable"]
-    for cat in cats:
+    for cat in ["bio", "nonbio"]:
         sub = df[df["category"] == cat]
         n = len(sub)
         fom1_str = ""

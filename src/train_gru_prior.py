@@ -81,7 +81,7 @@ def curate_corpus(training_data_dir):
             rejected["radicals"] += 1
             continue
         canonical = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=False)
-        if has_invalid_fragments(canonical, stability_mode=None):
+        if has_invalid_fragments(canonical):
             rejected["banned_fragments"] += 1
             continue
         valid.append(canonical)

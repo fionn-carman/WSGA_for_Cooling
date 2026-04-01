@@ -150,8 +150,6 @@ def main():
     parser.add_argument("--sc_threshold", type=float, default=3)
     parser.add_argument("--tox_threshold", type=float, default=3)
     parser.add_argument("--no_biodeg", action="store_true")
-    parser.add_argument("--stability_mode", type=str, default=None,
-                        choices=["strict"])
     parser.add_argument("--molprice_soft", type=float, default=0.0)
     parser.add_argument("--molprice_hard", type=float, default=0.0)
     parser.add_argument("--soft_constraints", action="store_true",
@@ -366,7 +364,6 @@ def main():
         fp_threshold=args.fp_threshold,
         tox_threshold=args.tox_threshold,
         use_biodeg=not args.no_biodeg,
-        stability_mode=args.stability_mode,
         molprice_soft=args.molprice_soft,
         molprice_hard=args.molprice_hard,
         soft_constraints=args.soft_constraints,

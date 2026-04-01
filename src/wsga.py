@@ -34,7 +34,6 @@ from wsga_helper import (
     load_regression_models_with_aux,
     load_fold_ensemble_models,
     compute_conformal_quantiles,
-    is_stable_fragment,
     compute_mahalanobis_params,
 )
 from evaluation import get_scscore_cached, strict_canonicalize_smiles
@@ -103,9 +102,6 @@ parser.add_argument("--molprice_hard", type=float, default=6.0,
 parser.add_argument("--tournament_k", type=int, default=3, help="Tournament selection size (k)")
 parser.add_argument("--best_elite_ratio", type=float, default=0.3,
     help="Fraction of elites selected by raw FitnessScore (rest by NichedFitnessScore)")
-parser.add_argument("--stability_mode", type=str, default=None,
-    choices=["strict"],
-    help="'strict': bans alkenes, glymes, limits ethers/esters/oxygens")
 parser.add_argument("--init_method", type=str, default="gru",
     choices=["gru", "ngram", "pubchem"],
     help="Initial population method: 'gru' (default), 'ngram', or 'pubchem'")
@@ -176,7 +172,6 @@ USE_BIODEG_FILTER = not args.no_biodeg
 MOLPRICE_MODEL_PATH = args.molprice_model
 MOLPRICE_SOFT = args.molprice_soft
 MOLPRICE_HARD = args.molprice_hard
-STABILITY_MODE = args.stability_mode
 
 # Structural Constraints
 MAX_HEAVY_ATOMS = 30
@@ -230,8 +225,6 @@ if MOLPRICE_MODEL_PATH:
     print(f"MolPrice hard threshold: {MOLPRICE_HARD} log(USD/mmol)")
 else:
     print(f"MolPrice penalty: disabled (no --molprice_model)")
-print(f"--- Stability Mode ---")
-print(f"Stability mode: {STABILITY_MODE}")
 print(f"--- Init Method ---")
 print(f"Init method: {args.init_method}")
 if args.init_method == "pubchem":
@@ -261,7 +254,7 @@ MUTATIONS = [
 
 # Allowed atoms (C=6, O=8)
 NewAtoms = [6, 8]
-BondTypes = [rdchem.BondType.SINGLE, rdchem.BondType.DOUBLE]
+BondTypes = [rdchem.BondType.SINGLE]
 
 # Fragment libraries for mutations
 fragments = [Chem.MolFromSmiles(smi) for smi in [
@@ -296,8 +289,6 @@ fragments = [Chem.MolFromSmiles(smi) for smi in [
     'C1CCOCC1C', 'CC1CCOC1', 'C1CCOC1C', 'C1CCOCCO1',
     # Carbonates
     'COC(=O)OC', 'CCOC(=O)OCC', 'COC(=O)OCC', 'CCCOC(=O)OCCC',
-    # Unsaturated
-    'C=CC', 'CC=C', 'C=CCC', 'CC=CC', 'C=CCCC', 'CC=CCC', 'CCC=CC', 'C=CC=C'
 ]]
 
 Napthalenes = [Chem.MolFromSmiles(smi) for smi in [
@@ -306,32 +297,6 @@ Napthalenes = [Chem.MolFromSmiles(smi) for smi in [
 ]]
 
 AromaticMolecule = Chem.MolFromSmiles('c1ccccc1')
-
-# =============================
-# Stability Mode Filtering
-# =============================
-if STABILITY_MODE == "strict":
-    # Remove mutations that create unstable bonds
-    for rm_mut in ['Glycolate', 'ReplaceBond']:
-        if rm_mut in MUTATIONS:
-            MUTATIONS.remove(rm_mut)
-
-    # Only single bonds (prevent C=C creation)
-    BondTypes = [rdchem.BondType.SINGLE]
-
-    # Filter fragment library
-    fragments = [f for f in fragments if is_stable_fragment(f)]
-
-    # Tighten oxygen constraint
-    MAX_OXYGENS = 4
-
-    print(f"\n=== Stability Mode: STRICT ===")
-    print(f"  Mutations: {MUTATIONS}")
-    print(f"  BondTypes: {BondTypes}")
-    print(f"  Fragments: {len(fragments)} (after stability filter)")
-    print(f"  MAX_OXYGENS: {MAX_OXYGENS}")
-    print(f"==============================\n")
-
 
 # =============================
 # Properties to Track
@@ -653,7 +618,6 @@ def main():
         min_fp=MIN_FLASHPOINT,
         use_biodeg=USE_BIODEG_FILTER,
         max_tox21=MAX_TOX21,
-        stability_mode=STABILITY_MODE
     )
 
     evaluated_df = compute_fitness(evaluated_df, TARGET, TARGET_CONFIG)
@@ -805,7 +769,6 @@ def main():
             min_fp=MIN_FLASHPOINT,
             use_biodeg=USE_BIODEG_FILTER,
             max_tox21=MAX_TOX21,
-            stability_mode=STABILITY_MODE
         )
 
         evaluated_offspring_df = compute_fitness(evaluated_offspring_df, TARGET, TARGET_CONFIG)
@@ -973,7 +936,6 @@ def main():
                             min_fp=MIN_FLASHPOINT,
                             use_biodeg=USE_BIODEG_FILTER,
                             max_tox21=MAX_TOX21,
-                            stability_mode=STABILITY_MODE
                         )
                         fresh_evaluated = compute_fitness(fresh_evaluated, TARGET, TARGET_CONFIG)
                         if MOLPRICE_MODEL_PATH:

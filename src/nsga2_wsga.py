@@ -32,7 +32,6 @@ from wsga_helper import (
     assign_validity,
     load_regression_models_with_aux,
     load_fom1_direct_models,
-    is_stable_fragment,
     fast_non_dominated_sort,
     crowding_distance_3d,
     nsga2_tournament,
@@ -93,20 +92,12 @@ parser.add_argument("--fp_threshold", type=float, default=373, help="Min flash p
 parser.add_argument("--sc_threshold", type=float, default=3, help="Max SCScore")
 parser.add_argument("--tox_threshold", type=float, default=3, help="Max Tox21 score")
 
-# Category flag (replaces separate --no_biodeg + --stability_mode)
-parser.add_argument("--category", type=str, required=True,
-    choices=["bio_stable", "bio_unstable", "nonbio_stable", "nonbio_unstable"],
-    help="Category (determines biodeg filter + stability mode)")
+parser.add_argument("--no_biodeg", action="store_true",
+    help="Disable biodegradability filter")
 
 args = parser.parse_args()
 
-
-# =============================
-# Derive flags from category
-# =============================
-
-USE_BIODEG_FILTER = args.category.startswith("bio_")
-STABILITY_MODE = "strict" if args.category.endswith("_stable") else None
+USE_BIODEG_FILTER = not args.no_biodeg
 
 
 # =============================
@@ -172,9 +163,7 @@ HV_REF_POINT = np.array([0.0, -10.0])
 
 print(f"=== NSGA-II WSGA Configuration ===")
 print(f"Target: {TARGET}")
-print(f"Category: {args.category}")
-print(f"  Biodeg filter: {USE_BIODEG_FILTER}")
-print(f"  Stability mode: {STABILITY_MODE}")
+print(f"Biodeg filter: {USE_BIODEG_FILTER}")
 print(f"Population size: {GENERATION_SIZE}")
 print(f"Mutation rate: {BASE_MUTATION_RATE}")
 print(f"Tournament k: {TOURNAMENT_K}")
@@ -202,7 +191,7 @@ MUTATIONS = [
 ]
 
 NewAtoms = [6, 8]
-BondTypes = [rdchem.BondType.SINGLE, rdchem.BondType.DOUBLE]
+BondTypes = [rdchem.BondType.SINGLE]
 
 fragments = [Chem.MolFromSmiles(smi) for smi in [
     'CCCC', 'CCCCC', 'CCCCCC', 'CCCCCCC', 'CCCCCCCC', 'CCCCCCCCC', 'CCCCCCCCCC',
@@ -226,7 +215,6 @@ fragments = [Chem.MolFromSmiles(smi) for smi in [
     'C1CCOCC1', 'C1CCOC1', 'C1COCCO1', 'CC1CCOCC1', 'C1COCC1',
     'C1CCOCC1C', 'CC1CCOC1', 'C1CCOC1C', 'C1CCOCCO1',
     'COC(=O)OC', 'CCOC(=O)OCC', 'COC(=O)OCC', 'CCCOC(=O)OCCC',
-    'C=CC', 'CC=C', 'C=CCC', 'CC=CC', 'C=CCCC', 'CC=CCC', 'CCC=CC', 'C=CC=C'
 ]]
 
 Napthalenes = [Chem.MolFromSmiles(smi) for smi in [
@@ -236,18 +224,6 @@ Napthalenes = [Chem.MolFromSmiles(smi) for smi in [
 
 AromaticMolecule = Chem.MolFromSmiles('c1ccccc1')
 
-# Stability mode adjustments
-if STABILITY_MODE == "strict":
-    for rm_mut in ['Glycolate', 'ReplaceBond']:
-        if rm_mut in MUTATIONS:
-            MUTATIONS.remove(rm_mut)
-    BondTypes = [rdchem.BondType.SINGLE]
-    fragments = [f for f in fragments if is_stable_fragment(f)]
-    MAX_OXYGENS = 4
-    print(f"\n=== Stability Mode: STRICT ===")
-    print(f"  Mutations: {MUTATIONS}")
-    print(f"  Fragments: {len(fragments)} (after stability filter)")
-    print(f"==============================\n")
 
 
 # =============================
@@ -508,7 +484,7 @@ def main():
         evaluated_df,
         sc_threshold=MAX_SCSCORE, mp_max=MP_THRESHOLD, bp_min=BP_THRESHOLD,
         dc_max=DC_THRESHOLD, min_fp=MIN_FLASHPOINT, use_biodeg=USE_BIODEG_FILTER,
-        max_tox21=MAX_TOX21, stability_mode=STABILITY_MODE
+        max_tox21=MAX_TOX21,
     )
 
     # ----- NSGA-II Selection on Initial Population -----
@@ -617,7 +593,7 @@ def main():
             evaluated_offspring_df,
             sc_threshold=MAX_SCSCORE, mp_max=MP_THRESHOLD, bp_min=BP_THRESHOLD,
             dc_max=DC_THRESHOLD, min_fp=MIN_FLASHPOINT, use_biodeg=USE_BIODEG_FILTER,
-            max_tox21=MAX_TOX21, stability_mode=STABILITY_MODE
+            max_tox21=MAX_TOX21,
         )
 
         # Update seen SMILES
@@ -726,7 +702,7 @@ def main():
                             fresh_evaluated,
                             sc_threshold=MAX_SCSCORE, mp_max=MP_THRESHOLD, bp_min=BP_THRESHOLD,
                             dc_max=DC_THRESHOLD, min_fp=MIN_FLASHPOINT, use_biodeg=USE_BIODEG_FILTER,
-                            max_tox21=MAX_TOX21, stability_mode=STABILITY_MODE
+                            max_tox21=MAX_TOX21,
                         )
 
                         fresh_evaluated["CanonicalSMILES"] = fresh_evaluated["SMILES"].apply(strict_canonicalize_smiles)

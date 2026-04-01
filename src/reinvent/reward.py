@@ -93,14 +93,14 @@ def soft_constraint_score(row, bp_threshold, mp_threshold, fp_threshold,
     return score
 
 
-def _has_structural_issues(smiles, stability_mode=None):
+def _has_structural_issues(smiles):
     """Check hard structural filters that cannot be softened.
 
     Returns True if the molecule has invalid fragments, radicals,
     small rings, or valence errors — these are chemical impossibilities,
     not tunable constraints.
     """
-    if has_invalid_fragments(smiles, stability_mode=stability_mode):
+    if has_invalid_fragments(smiles):
         return True
     mol = Chem.MolFromSmiles(smiles) if isinstance(smiles, str) else None
     if mol is None:
@@ -198,7 +198,6 @@ class CoolingFluidReward:
         fp_threshold=373,
         tox_threshold=3,
         use_biodeg=True,
-        stability_mode=None,
         molprice_soft=0.0,
         molprice_hard=0.0,
         soft_constraints=False,
@@ -211,7 +210,6 @@ class CoolingFluidReward:
         self.fp_threshold = fp_threshold
         self.tox_threshold = tox_threshold
         self.use_biodeg = use_biodeg
-        self.stability_mode = stability_mode
         self.molprice_soft = molprice_soft
         self.molprice_hard = molprice_hard
         self.soft_constraints = soft_constraints
@@ -320,7 +318,6 @@ class CoolingFluidReward:
             min_fp=self.fp_threshold,
             use_biodeg=self.use_biodeg,
             max_tox21=self.tox_threshold,
-            stability_mode=self.stability_mode,
         )
 
         if self.soft_constraints:
@@ -335,7 +332,7 @@ class CoolingFluidReward:
                 smi = row["SMILES"]
 
                 # Hard structural filters — chemical impossibilities get 0
-                if _has_structural_issues(smi, self.stability_mode):
+                if _has_structural_issues(smi):
                     soft_scores[j] = 0.0
                     continue
 
