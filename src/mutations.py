@@ -370,6 +370,11 @@ def ReplaceBond(StartingMolecule, Bonds, showdiff=True, Verbose=False):
         ReplaceBondType = StartingMoleculeUnedited.GetBondWithIdx(ReplaceBondIdx).GetBondType()
         BondReplacements = [x for x in Bonds if x != ReplaceBondType]
 
+        if len(BondReplacements) == 0:
+            if Verbose:
+                print('No alternative bond types available.')
+            return None, None
+
         StartingMolecule = Chem.RWMol(StartingMoleculeUnedited)
 
         ReplacedBond = StartingMolecule.GetBondWithIdx(ReplaceBondIdx)

@@ -34,7 +34,7 @@
 #   - Init method       = gru
 #   - Biodeg filter     = OFF (--no_biodeg)
 #   - Target            = FOM1
-#   - FP threshold      = 398 K
+#   - FP threshold      = 373 K (100 °C)
 #
 # Total: 4 * 5 * 5 * 3 * 5 = 1,500 jobs
 #
@@ -145,7 +145,7 @@ python3 ../src/wsga.py \
     --Tau $TAU \
     --num_generations $NUM_GENERATIONS \
     --no_biodeg \
-    --fp_threshold 398 \
+    --fp_threshold 373 \
     --bp_threshold 100 \
     --dc_threshold 7 \
     --mp_threshold -30 \
