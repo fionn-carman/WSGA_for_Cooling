@@ -1039,10 +1039,25 @@ def main():
     output_top_path = os.path.join(args.output_dir, f"top_{TOP_FINAL}_molecules_{TARGET}.csv")
     final_top_df.to_csv(output_top_path, index=False)
 
+    # Save top molecules by raw FOM1 (ignoring MolPrice penalty)
+    # Ensures high-FOM1 discoveries are never hidden by cost penalties
+    fom1_col = "fom1_40C" if "fom1_40C" in elite_df.columns else "FOM1_40"
+    valid_elite = elite_df[elite_df["is_valid"] == 1] if "is_valid" in elite_df.columns else elite_df
+    if fom1_col in valid_elite.columns and not valid_elite.empty:
+        final_top_fom1_df = (
+            valid_elite
+            .sort_values(fom1_col, ascending=False)
+            .head(TOP_FINAL)
+            .reset_index(drop=True)
+        )
+        output_top_fom1_path = os.path.join(args.output_dir, f"top_{TOP_FINAL}_molecules_{TARGET}_raw.csv")
+        final_top_fom1_df.to_csv(output_top_fom1_path, index=False)
+
     print(f"\n{'='*50}")
     print(f"WSGA COMPLETE")
     print(f"{'='*50}")
     print(f"Saved top {TOP_FINAL} molecules to: {output_top_path}")
+    print(f"Saved top {TOP_FINAL} by raw FOM1 to: {output_top_fom1_path}")
     print(f"All evaluated molecules: {ALL_EVALUATED_PATH}")
     print(f"Top N tracking: {TOP_N_TRACKING_PATH}")
     print(f"Generation stats: {GENERATION_STATS_PATH}")
