@@ -60,6 +60,7 @@ NIST_WTT_Collection/
 # NIST 8,100-molecule dataset (private, not for redistribution)
 training/data/nist_8100/
 
-# Claude Code
+# AI agent context
 CLAUDE.md
+AGENTS.md
 .claude/

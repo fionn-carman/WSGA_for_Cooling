@@ -177,6 +177,7 @@ def apply_mutations_to_population(
     # Track mutation usage for diagnostics
     mutation_counts = {m: 0 for m in MUTATIONS}
     mutation_success = {m: 0 for m in MUTATIONS}
+    reserved_smiles = set(seen_smiles)
 
     for smi in df["SMILES"]:
 
@@ -230,11 +231,12 @@ def apply_mutations_to_population(
                     continue
 
                 canonical = strict_canonicalize_smiles(mutated_smi)
-                if canonical in seen_smiles:
+                if canonical is None or canonical in reserved_smiles:
                     continue
 
                 # SUCCESS
                 new_smi = canonical
+                reserved_smiles.add(canonical)
                 seen_smiles.add(canonical)
                 successful += 1
                 mutation_success[mutation] += 1
@@ -628,12 +630,12 @@ def assign_validity(
     return df
 
 
-def compute_tanimoto_similarities(df):
+def compute_tanimoto_similarities(df, radius=8):
     """
     Compute average Tanimoto similarity for each molecule in the population.
     Adds 'AvgTanimotoSimilarity' column to df.
     """
-    fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=8, fpSize=2048)
+    fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=2048)
 
     def mol_fp_gen(smiles_list):
         for smi in smiles_list:
@@ -656,12 +658,12 @@ def compute_tanimoto_similarities(df):
     return df
 
 
-def apply_niching(df, tau=0.05, alpha=1000, p=2):
+def apply_niching(df, tau=0.05, alpha=1000, p=2, radius=8):
     """
     Apply niching penalty based on Tanimoto similarity to promote diversity.
     Uses precomputed fingerprints for efficiency.
     """
-    df = compute_tanimoto_similarities(df)
+    df = compute_tanimoto_similarities(df, radius=radius)
 
     # Apply niching penalty
     penalty = np.exp(-alpha * np.maximum(0, df["AvgTanimotoSimilarity"] - tau) ** p)
@@ -680,7 +682,7 @@ def k_way_tournament(elite_df, k=3):
     return winner['SMILES']
 
 
-def TanimotoSimilarity(SMILES, SMILESList):
+def TanimotoSimilarity(SMILES, SMILESList, radius=8):
     """
     Calculate average Tanimoto similarity between a molecule and a list.
     Note: This is O(n) per call - for bulk operations use apply_niching instead.
@@ -690,7 +692,7 @@ def TanimotoSimilarity(SMILES, SMILESList):
     ms = [Chem.MolFromSmiles(x) for x in SMILESList]
     SMILESms = Chem.MolFromSmiles(SMILES)
 
-    fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=8, fpSize=2048)
+    fpgen = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=2048)
     SMILESfps = fpgen.GetFingerprint(SMILESms)
     fps = [fpgen.GetFingerprint(x) for x in ms if x is not None]
 

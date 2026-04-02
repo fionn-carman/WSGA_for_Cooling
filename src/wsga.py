@@ -27,6 +27,7 @@ from wsga_helper import (
     k_way_tournament,
     load_tox21_predictor,
     load_biodeg_model,
+    compute_tanimoto_similarities,
     apply_niching,
     assign_validity,
     compute_fitness,
@@ -78,6 +79,10 @@ parser.add_argument("--model_dir", type=str, default="../models", help="Model di
 parser.add_argument("--training_data_dir", type=str, default="../training/data",
     help="Training data directory (for Mahalanobis OOD detection)")
 parser.add_argument("--Tau", "--tau", type=float, default=0.05, help="Threshold for niching")
+parser.add_argument("--niching_radius", type=int, default=8,
+    help="Morgan fingerprint radius for niching similarity (default: 8)")
+parser.add_argument("--no_niching", action="store_true",
+    help="Disable niching (NichedFitnessScore = FitnessScore)")
 parser.add_argument("--target", type=str, default="FOM1",
     choices=["FOM1", "FOM1_direct"],
     help="Target property to optimize"
@@ -190,6 +195,8 @@ GENERATION_STATS_PATH = os.path.join(args.output_dir, "generation_stats.csv")
 # Display
 VISUALIZE = False
 TAU = args.Tau
+NICHING_RADIUS = args.niching_radius
+NO_NICHING = args.no_niching
 
 print(f"=== WSGA Configuration ===")
 print(f"Target: {TARGET}")
@@ -201,6 +208,8 @@ print(f"Elitism rate: {ELITISM_RATE}")
 print(f"Base mutation rate: {BASE_MUTATION_RATE}")
 print(f"Tournament k: {TOURNAMENT_K}")
 print(f"Tau (niching): {TAU}")
+print(f"Niching radius: {NICHING_RADIUS}")
+print(f"Niching disabled: {NO_NICHING}")
 print(f"Top N tracking: {TOP_N}")
 print(f"Model directory: {MODEL_DIR}")
 print(f"--- Stagnation Settings ---")
@@ -623,7 +632,11 @@ def main():
     evaluated_df = compute_fitness(evaluated_df, TARGET, TARGET_CONFIG)
     if MOLPRICE_MODEL_PATH:
         evaluated_df = apply_molprice_penalty(evaluated_df, soft_threshold=MOLPRICE_SOFT, hard_threshold=MOLPRICE_HARD)
-    evaluated_df = apply_niching(evaluated_df)
+    if NO_NICHING:
+        evaluated_df = compute_tanimoto_similarities(evaluated_df, radius=NICHING_RADIUS)
+        evaluated_df["NichedFitnessScore"] = evaluated_df["FitnessScore"]
+    else:
+        evaluated_df = apply_niching(evaluated_df, tau=TAU, radius=NICHING_RADIUS)
 
     # Select initial GA population
     initial_population_df = (
@@ -698,6 +711,7 @@ def main():
         # ----- Generate Offspring via Crossover -----
         required_offspring = GENERATION_SIZE - len(elite_df)
         new_population_smiles = []
+        batch_seen = set()
 
         with tqdm(total=required_offspring, desc="Crossover") as pbar:
             while len(new_population_smiles) < required_offspring:
@@ -723,8 +737,11 @@ def main():
                     continue
 
                 canonical_child = strict_canonicalize_smiles(child)
-                if canonical_child not in seen_smiles:
+                if canonical_child is None:
+                    continue
+                if canonical_child not in seen_smiles and canonical_child not in batch_seen:
                     new_population_smiles.append(canonical_child)
+                    batch_seen.add(canonical_child)
                     pbar.update(1)
 
         offspring_df = pd.DataFrame({'SMILES': new_population_smiles})
@@ -787,8 +804,12 @@ def main():
         # CRITICAL: Apply niching to the COMBINED population
         # This ensures elite molecules get re-penalized if population becomes similar to them
         # and new molecules are penalized based on similarity to entire pool
-        combined_df = apply_niching(combined_df, tau=TAU)
-        
+        if NO_NICHING:
+            combined_df = compute_tanimoto_similarities(combined_df, radius=NICHING_RADIUS)
+            combined_df["NichedFitnessScore"] = combined_df["FitnessScore"]
+        else:
+            combined_df = apply_niching(combined_df, tau=TAU, radius=NICHING_RADIUS)
+
         # HYBRID ELITE SELECTION:
         # 1. Reserve slots for BEST molecules by raw FitnessScore (guaranteed survival of top performers)
         # 2. Fill remaining slots by NichedFitnessScore (diversity-promoting)
@@ -955,7 +976,11 @@ def main():
                         
                         # Combine kept elites with fresh molecules
                         combined_restart = pd.concat([elite_df_kept, fresh_evaluated], ignore_index=True)
-                        combined_restart = apply_niching(combined_restart, tau=TAU)
+                        if NO_NICHING:
+                            combined_restart = compute_tanimoto_similarities(combined_restart, radius=NICHING_RADIUS)
+                            combined_restart["NichedFitnessScore"] = combined_restart["FitnessScore"]
+                        else:
+                            combined_restart = apply_niching(combined_restart, tau=TAU, radius=NICHING_RADIUS)
                         
                         # Re-select elites using hybrid approach
                         combined_restart = combined_restart.sort_values('FitnessScore', ascending=False).drop_duplicates(subset='SMILES', keep='first')
