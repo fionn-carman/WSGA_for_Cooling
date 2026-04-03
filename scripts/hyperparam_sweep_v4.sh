@@ -34,7 +34,7 @@
 #   - Init method       = gru
 #   - Biodeg filter     = OFF (--no_biodeg)
 #   - Target            = FOM1
-#   - FP threshold      = 373 K (100 °C)
+#   - FP threshold      = 398 K (125 °C)
 #
 # Total: 4 * 5 * 5 * 3 * 5 = 1,500 jobs
 #
@@ -108,7 +108,7 @@ NUM_GENERATIONS=150
 # ==============================
 # Setup output directory
 # ==============================
-output_dir="../outputs/hyperparam_sweep_v4/pop${POP}_mr${MR}_er${ER}_k${K}_seed${SEED}"
+output_dir="../outputs/hyperparam_sweep_v4_fp125/pop${POP}_mr${MR}_er${ER}_k${K}_seed${SEED}"
 mkdir -p "$output_dir"
 
 log_file="${output_dir}/config.log"
@@ -145,7 +145,7 @@ python3 ../src/wsga.py \
     --Tau $TAU \
     --num_generations $NUM_GENERATIONS \
     --no_biodeg \
-    --fp_threshold 373 \
+    --fp_threshold 398 \
     --bp_threshold 100 \
     --dc_threshold 7 \
     --mp_threshold -30 \
