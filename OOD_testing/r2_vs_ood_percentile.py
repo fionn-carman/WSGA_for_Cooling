@@ -111,7 +111,7 @@ PROPERTIES = {
         "log_transform": False,
     },
     "dc": {
-        "csv": "constraints/DC_exp_cleaned_v1.csv",
+        "csv": "constraints/DC_exp_cleaned.csv",
         "target": "DC_exp",
         "desc_csv": "constraints/descriptors_rdkit_mordred.csv",
         "model_dir": "dc",
@@ -396,21 +396,33 @@ def run_metric(
         metric_values[~valid] = np.nanmin(metric_values) - 1
 
     decile_labels = pd.qcut(metric_values, q=10, labels=False, duplicates="drop")
+    n_actual_bins = int(decile_labels.max()) + 1
+    if n_actual_bins < 10:
+        logger.warning(
+            "    pd.qcut produced %d bins (not 10) — ties in %s values",
+            n_actual_bins, metric_name,
+        )
 
     coarse_results = []
     d10_model = None
     d10_fi = None
+    max_label = int(decile_labels.max())
 
-    for decile in range(10):
+    for decile in range(n_actual_bins):
         test_mask = decile_labels == decile
         train_mask = ~test_mask
-        metric_test = metric_values[test_mask]
+        n_test = int(test_mask.sum())
 
-        pct_lo = decile * 10
-        pct_hi = (decile + 1) * 10
+        if n_test == 0:
+            logger.warning("    Decile %d: 0 molecules, skipping", decile)
+            continue
+
+        metric_test = metric_values[test_mask]
+        pct_lo = round(decile * 100 / n_actual_bins, 1)
+        pct_hi = round((decile + 1) * 100 / n_actual_bins, 1)
 
         logger.info(
-            "    Decile %d (%d-%d%%, n=%d)...", decile, pct_lo, pct_hi, test_mask.sum()
+            "    Decile %d (%s-%s%%, n=%d)...", decile, pct_lo, pct_hi, n_test
         )
 
         metrics, model, fi = train_and_evaluate(
@@ -425,7 +437,7 @@ def run_metric(
         row = {
             "decile": decile,
             "pct_range": f"{pct_lo}-{pct_hi}",
-            "n_test": int(test_mask.sum()),
+            "n_test": n_test,
             "n_train": int(train_mask.sum()),
             "metric_mean": float(metric_test.mean()),
             "metric_median": float(np.median(metric_test)),
@@ -443,7 +455,7 @@ def run_metric(
             metrics["elapsed_s"],
         )
 
-        if decile == 9:
+        if decile == max_label:
             d10_model = model
             d10_fi = fi
 
@@ -452,7 +464,7 @@ def run_metric(
     logger.info("    Saved coarse_%s.csv", metric_name)
 
     # ── Tail zoom: 4 sub-bins in top decile ──────────────────────────
-    d10_mask = decile_labels == 9
+    d10_mask = decile_labels == max_label
     d10_metric = metric_values[d10_mask]
     d10_X = X_all[d10_mask]
     d10_y_raw = y_all_raw[d10_mask]
