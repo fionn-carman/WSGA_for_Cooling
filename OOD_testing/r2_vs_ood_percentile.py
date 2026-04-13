@@ -155,7 +155,7 @@ def compute_knn(X: np.ndarray, k: int = 5) -> np.ndarray:
 
 
 def compute_tanimoto(smiles_list: list) -> np.ndarray:
-    """1 - max Tanimoto similarity to nearest other molecule (Morgan r=2, 2048 bits)."""
+    """Mean Tanimoto distance (1 - mean similarity) to all other molecules (Morgan r=2, 2048 bits)."""
     from rdkit import Chem, DataStructs
     from rdkit.Chem import rdFingerprintGenerator
 
@@ -171,8 +171,8 @@ def compute_tanimoto(smiles_list: list) -> np.ndarray:
     ts_dist = np.full(len(smiles_list), np.nan)
     for ii, i in enumerate(valid_idx):
         sims = DataStructs.BulkTanimotoSimilarity(fps[ii], fps)
-        sims[ii] = 0.0  # exclude self
-        ts_dist[i] = 1.0 - max(sims)
+        sims[ii] = np.nan  # exclude self
+        ts_dist[i] = 1.0 - np.nanmean(sims)
         if (ii + 1) % 1000 == 0:
             logger.info("    Tanimoto: %d / %d", ii + 1, len(valid_idx))
 
@@ -521,13 +521,21 @@ def run_metric(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--property", required=True, choices=list(PROPERTIES.keys()))
+    parser.add_argument("--metrics", nargs="+", default=["md", "knn", "ts"],
+                        choices=["md", "knn", "ts"],
+                        help="Which OOD metrics to run (default: all three)")
+    parser.add_argument("--output-dir", default=None,
+                        help="Override output directory (default: r2_vs_ood_percentile/<property>)")
     args = parser.parse_args()
 
     prop_name = args.property
     cfg = PROPERTIES[prop_name]
     logger.info("=== Property: %s ===", prop_name)
 
-    out_dir = SCRIPT_DIR / "r2_vs_ood_percentile" / prop_name
+    if args.output_dir:
+        out_dir = Path(args.output_dir)
+    else:
+        out_dir = SCRIPT_DIR / "r2_vs_ood_percentile" / prop_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
     data_dir = ROOT / "training" / "data"
@@ -563,22 +571,29 @@ def main():
     smiles_list = merged["SMILES"].tolist()
 
     # ── Compute OOD metrics ──────────────────────────────────────────
-    logger.info("  Computing OOD metrics...")
+    logger.info("  Computing OOD metrics: %s ...", ", ".join(args.metrics))
+    metric_map = {}
 
-    t0 = time.time()
-    md_values = compute_mahalanobis(X_all[:, dep_fi])
-    logger.info("    MD done (%.1fs): range [%.2f, %.2f]", time.time() - t0, md_values.min(), md_values.max())
+    if "md" in args.metrics:
+        t0 = time.time()
+        md_values = compute_mahalanobis(X_all[:, dep_fi])
+        logger.info("    MD done (%.1fs): range [%.2f, %.2f]", time.time() - t0, md_values.min(), md_values.max())
+        metric_map["md"] = md_values
 
-    t0 = time.time()
-    knn_values = compute_knn(X_all[:, dep_fi], k=5)
-    logger.info("    kNN done (%.1fs): range [%.2f, %.2f]", time.time() - t0, knn_values.min(), knn_values.max())
+    if "knn" in args.metrics:
+        t0 = time.time()
+        knn_values = compute_knn(X_all[:, dep_fi], k=5)
+        logger.info("    kNN done (%.1fs): range [%.2f, %.2f]", time.time() - t0, knn_values.min(), knn_values.max())
+        metric_map["knn"] = knn_values
 
-    t0 = time.time()
-    ts_values = compute_tanimoto(smiles_list)
-    logger.info("    TS done (%.1fs): range [%.4f, %.4f]", time.time() - t0, np.nanmin(ts_values), np.nanmax(ts_values))
+    if "ts" in args.metrics:
+        t0 = time.time()
+        ts_values = compute_tanimoto(smiles_list)
+        logger.info("    TS done (%.1fs): range [%.4f, %.4f]", time.time() - t0, np.nanmin(ts_values), np.nanmax(ts_values))
+        metric_map["ts"] = ts_values
 
     # ── Run analysis per metric ──────────────────────────────────────
-    for metric_name, metric_values in [("md", md_values), ("knn", knn_values), ("ts", ts_values)]:
+    for metric_name, metric_values in metric_map.items():
         run_metric(
             metric_name,
             metric_values,

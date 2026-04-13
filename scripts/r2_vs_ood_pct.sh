@@ -7,7 +7,9 @@
 #PBS -e /dev/null
 
 # R² vs OOD metric percentile — multi-property array job
-# Each array task runs one property with all 3 metrics (MD, kNN, TS)
+# Each array task runs one property.
+# Set METRICS env var to restrict which OOD metrics to run (default: all).
+# Example: qsub -v METRICS="ts" scripts/r2_vs_ood_pct.sh
 
 eval "$(~/miniforge3/bin/conda shell.bash hook)"
 conda activate mol-rl
@@ -17,13 +19,19 @@ cd "$PBS_O_WORKDIR" || exit 1
 PROPERTIES=(fom1_40C cpsat_40C beta_40C density_40C viscosity_40C tc_40C bp mp fp dc)
 PROP=${PROPERTIES[$PBS_ARRAY_INDEX]}
 
-LOG_DIR="OOD_testing/r2_vs_ood_percentile/${PROP}"
-mkdir -p "$LOG_DIR"
+OUT_DIR="OOD_testing/r2_vs_ood_percentile/${PROP}"
+mkdir -p "$OUT_DIR"
 
-echo "=== Job $PBS_ARRAY_INDEX: $PROP ===" | tee "${LOG_DIR}/run_log.txt"
-echo "Start: $(date)" | tee -a "${LOG_DIR}/run_log.txt"
+# Default to all metrics if METRICS not set
+METRIC_ARGS=""
+if [ -n "$METRICS" ]; then
+    METRIC_ARGS="--metrics $METRICS"
+fi
 
-python OOD_testing/r2_vs_ood_percentile.py --property "$PROP" \
-    2>&1 | tee -a "${LOG_DIR}/run_log.txt"
+echo "=== Job $PBS_ARRAY_INDEX: $PROP (metrics: ${METRICS:-all}) ===" | tee "${OUT_DIR}/run_log.txt"
+echo "Start: $(date)" | tee -a "${OUT_DIR}/run_log.txt"
 
-echo "End: $(date)" | tee -a "${LOG_DIR}/run_log.txt"
+python OOD_testing/r2_vs_ood_percentile.py --property "$PROP" $METRIC_ARGS \
+    2>&1 | tee -a "${OUT_DIR}/run_log.txt"
+
+echo "End: $(date)" | tee -a "${OUT_DIR}/run_log.txt"
