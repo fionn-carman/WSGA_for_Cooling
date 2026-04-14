@@ -18,7 +18,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from rdkit import Chem
+from rdkit import Chem, DataStructs
+from rdkit.Chem import rdFingerprintGenerator
 from rdkit.Chem.Scaffolds import MurckoScaffold
 from torch.utils.data import DataLoader, Dataset
 
@@ -216,6 +217,86 @@ class ScaffoldDiversityFilter:
 
 
 # ─────────────────────────────────────────────
+# Tanimoto Niching Filter
+# ─────────────────────────────────────────────
+
+class TanimotoNichingFilter:
+    """Continuous diversity penalty based on Tanimoto similarity.
+
+    Ports the WSGA niching mechanism (wsga_helper.apply_niching) into
+    REINVENT's reward pipeline.  For each molecule, computes average
+    Tanimoto similarity to the current top-K molecules in a reference
+    set, then applies:
+
+        reward *= exp(-alpha * max(0, avg_sim - tau)^2) * (1 - avg_sim)
+
+    Unlike the scaffold filter (binary cutoff), this gives a smooth
+    gradient that penalises molecules proportional to their similarity
+    to already-discovered elites.
+    """
+
+    def __init__(self, tau=0.15, alpha=1000, radius=8, ref_size=100):
+        self.tau = tau
+        self.alpha = alpha
+        self.fpgen = rdFingerprintGenerator.GetMorganGenerator(
+            radius=radius, fpSize=2048)
+        self.ref_size = ref_size
+        # Reference fingerprints: updated each step from eval_cache
+        self._ref_fps = []
+
+    def update_reference(self, eval_cache):
+        """Rebuild reference set from top-K molecules in the eval cache."""
+        items = [
+            (csmi, data["FitnessScore"])
+            for csmi, data in eval_cache.items()
+            if data["FitnessScore"] > 0
+        ]
+        items.sort(key=lambda x: x[1], reverse=True)
+        items = items[: self.ref_size]
+
+        self._ref_fps = []
+        for csmi, _ in items:
+            mol = Chem.MolFromSmiles(csmi)
+            if mol:
+                self._ref_fps.append(self.fpgen.GetFingerprint(mol))
+
+    def apply_niching(self, smiles_list, rewards):
+        """Apply Tanimoto niching penalty to rewards.
+
+        Args:
+            smiles_list: list of canonical SMILES (may contain None).
+            rewards: np.array of rewards.
+
+        Returns:
+            (niched_rewards, mean_penalty) — modified rewards and
+            average penalty applied (for logging).
+        """
+        if not self._ref_fps:
+            return rewards.copy(), 0.0
+
+        niched = rewards.copy()
+        penalties = []
+        for i, smi in enumerate(smiles_list):
+            if smi is None or niched[i] <= 0:
+                continue
+            mol = Chem.MolFromSmiles(smi)
+            if mol is None:
+                continue
+            fp = self.fpgen.GetFingerprint(mol)
+            sims = [DataStructs.TanimotoSimilarity(fp, ref)
+                    for ref in self._ref_fps]
+            avg_sim = np.mean(sims) if sims else 0.0
+
+            penalty = (np.exp(-self.alpha * max(0, avg_sim - self.tau) ** 2)
+                       * (1 - avg_sim))
+            niched[i] *= penalty
+            penalties.append(penalty)
+
+        mean_pen = np.mean(penalties) if penalties else 1.0
+        return niched, mean_pen
+
+
+# ─────────────────────────────────────────────
 # Experience Replay Buffer (Augmented Memory)
 # ─────────────────────────────────────────────
 
@@ -309,7 +390,9 @@ class ReinventTrainer:
                  device="cpu",
                  diversity_filter=True, max_per_scaffold=25,
                  replay_buffer_size=100, replay_max_per_scaffold=10,
-                 replay_fraction=0.5):
+                 replay_fraction=0.5,
+                 tanimoto_niching=False, niching_tau=0.15,
+                 niching_radius=8, niching_ref_size=100):
         self.prior = prior          # frozen
         self.agent = agent          # trainable
         self.vocab = vocab
@@ -334,6 +417,11 @@ class ReinventTrainer:
             ReplayBuffer(max_size=replay_buffer_size,
                          max_per_scaffold=replay_max_per_scaffold)
             if replay_buffer_size > 0 else None
+        )
+        self.tanimoto_niching = (
+            TanimotoNichingFilter(tau=niching_tau, radius=niching_radius,
+                                  ref_size=niching_ref_size)
+            if tanimoto_niching else None
         )
 
         # Tracking
@@ -396,19 +484,26 @@ class ReinventTrainer:
             if csmi is not None and csmi in self.eval_cache:
                 rewards[i] = self.eval_cache[csmi]["FitnessScore"]
 
-        # 4b. Add good molecules to replay buffer
+        # 4b. Apply scaffold diversity filter
+        n_filtered = 0
+        if self.diversity_filter is not None:
+            rewards, n_filtered = self.diversity_filter.filter_rewards(
+                canonical, rewards)
+
+        # 4b2. Apply Tanimoto niching penalty
+        niching_penalty = 1.0
+        if self.tanimoto_niching is not None:
+            self.tanimoto_niching.update_reference(self.eval_cache)
+            rewards, niching_penalty = self.tanimoto_niching.apply_niching(
+                canonical, rewards)
+
+        # 4c. Add only post-filter rewarded molecules to replay buffer
         n_replay_used = 0
         if self.replay_buffer is not None:
             for i, csmi in enumerate(canonical):
                 if csmi is not None and rewards[i] > 0:
                     self.replay_buffer.add(csmi, float(rewards[i]),
                                            self.step_count)
-
-        # 4c. Apply scaffold diversity filter
-        n_filtered = 0
-        if self.diversity_filter is not None:
-            rewards, n_filtered = self.diversity_filter.filter_rewards(
-                canonical, rewards)
 
         # 5. Build combined loss batch: fresh SMILES + replay SMILES
         #    Encode sampled SMILES (use original strings, not canonical,
@@ -429,6 +524,15 @@ class ReinventTrainer:
         if replay_samples:
             replay_smiles = [s for s, _ in replay_samples]
             replay_rewards = np.array([r for _, r in replay_samples])
+
+            # Re-apply the diversity filter so replay cannot bypass scaffold caps.
+            if self.diversity_filter is not None:
+                replay_rewards, replay_filtered = (
+                    self.diversity_filter.filter_rewards(
+                        replay_smiles, replay_rewards
+                    )
+                )
+                n_filtered += replay_filtered
 
             replay_encoded = encode_batch(
                 replay_smiles, self.vocab, self.device)
@@ -513,6 +617,7 @@ class ReinventTrainer:
                             if self.diversity_filter else 0),
             "n_saturated": (self.diversity_filter.n_saturated
                             if self.diversity_filter else 0),
+            "niching_penalty": niching_penalty,
             "replay_size": len(self.replay_buffer)
                            if self.replay_buffer else 0,
         }

@@ -217,6 +217,13 @@ def main():
                         help="Max molecules per scaffold in replay buffer")
     parser.add_argument("--replay_fraction", type=float, default=0.5,
                         help="Fraction of batch from replay buffer")
+    parser.add_argument("--tanimoto_niching", action="store_true",
+                        default=False,
+                        help="Enable Tanimoto niching penalty (WSGA-style)")
+    parser.add_argument("--niching_tau", type=float, default=0.15,
+                        help="Niching threshold (similarity below tau is penalty-free)")
+    parser.add_argument("--niching_radius", type=int, default=8,
+                        help="Morgan fingerprint radius for niching")
 
     args = parser.parse_args()
 
@@ -390,6 +397,9 @@ def main():
         replay_buffer_size=args.replay_buffer_size,
         replay_max_per_scaffold=args.replay_max_per_scaffold,
         replay_fraction=args.replay_fraction,
+        tanimoto_niching=args.tanimoto_niching,
+        niching_tau=args.niching_tau,
+        niching_radius=args.niching_radius,
     )
 
     tracking_data = []
@@ -409,6 +419,8 @@ def main():
                     f" replay={metrics['n_replay']}"
                     f"/{metrics['replay_size']}"
                 )
+            if args.tanimoto_niching:
+                div_str += f" niche={metrics['niching_penalty']:.3f}"
             print(
                 f"Step {step:5d}: "
                 f"reward={metrics['reward_mean']:.2f} "
