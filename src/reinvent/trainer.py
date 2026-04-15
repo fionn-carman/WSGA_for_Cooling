@@ -170,6 +170,8 @@ class ScaffoldDiversityFilter:
         self.max_per_scaffold = max_per_scaffold
         self.mode = mode
         self.scaffold_counts = defaultdict(int)
+        self.n_unknown_assigned = 0
+        self.n_unknown_filtered = 0
 
     def _get_key(self, smi):
         try:
@@ -206,8 +208,12 @@ class ScaffoldDiversityFilter:
             if self.scaffold_counts[key] >= self.max_per_scaffold:
                 filtered[i] = 0.0
                 n_filtered += 1
+                if key == "unknown":
+                    self.n_unknown_filtered += 1
             else:
                 self.scaffold_counts[key] += 1
+                if key == "unknown":
+                    self.n_unknown_assigned += 1
         return filtered, n_filtered
 
     @property
@@ -645,6 +651,10 @@ class ReinventTrainer:
                             if self.diversity_filter else 0),
             "n_saturated": (self.diversity_filter.n_saturated
                             if self.diversity_filter else 0),
+            "brics_unknown_assigned": (self.diversity_filter.n_unknown_assigned
+                                        if self.diversity_filter else 0),
+            "brics_unknown_filtered": (self.diversity_filter.n_unknown_filtered
+                                        if self.diversity_filter else 0),
             "niching_penalty": niching_penalty,
             "replay_size": len(self.replay_buffer)
                            if self.replay_buffer else 0,

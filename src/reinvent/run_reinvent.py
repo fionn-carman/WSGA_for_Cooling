@@ -426,6 +426,11 @@ def main():
             "batch_best_valid": metrics["batch_best_valid"],
             "best_valid_total": metrics["best_fitness"],
             "reward_mean": metrics["reward_mean"],
+            "n_filtered": metrics["n_filtered"],
+            "n_scaffolds": metrics["n_scaffolds"],
+            "n_saturated": metrics["n_saturated"],
+            "brics_unknown_assigned": metrics["brics_unknown_assigned"],
+            "brics_unknown_filtered": metrics["brics_unknown_filtered"],
         })
 
         # --- Log progress ---
