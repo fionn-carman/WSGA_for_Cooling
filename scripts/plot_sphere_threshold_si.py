@@ -162,8 +162,10 @@ def main():
     print(f"  between-group (non-rep → other rep): {len(between_sims)}, "
           f"median {np.median(between_sims) if between_sims else 0:.2f}")
 
-    # ── figure ──
-    fig, (ax_a, ax_b, ax_c) = plt.subplots(1, 3, figsize=(10.5, 3.2), dpi=150)
+    # ── figure (2 x 2 layout) ──
+    fig, axes = plt.subplots(2, 2, figsize=(9.0, 6.6), dpi=150)
+    ax_a, ax_b = axes[0]
+    ax_c, ax_d = axes[1]
 
     # (a) number of groups vs threshold
     xs = [t for t, _ in curve]
@@ -171,12 +173,33 @@ def main():
     ax_a.plot(xs, ys, "o-", color="#4c72b0", markersize=4, linewidth=1.0)
     ax_a.set_xlabel(r"Similarity threshold $\tau_{\mathrm{sim}}$")
     ax_a.set_ylabel("Number of groups")
-    ax_a.text(-0.18, 1.05, "(a)", transform=ax_a.transAxes,
+    ax_a.text(-0.14, 1.05, "(a)", transform=ax_a.transAxes,
               fontsize=10, fontweight="bold", va="bottom")
 
-    # (b) UMAP coloured by group — top 20 groups shown.
-    # First 10 groups: filled circles (tab10 palette).
-    # Next 10 groups:  unfilled circles (same colours, ring only).
+    # (b) group-size histogram at tau_sim = TAU
+    group_sizes = [count for _, count in Counter(group_ids_45).most_common()]
+    max_size = max(group_sizes)
+    # Use log-spaced bins since size distribution is heavy-tailed
+    bins_b = np.logspace(0, np.log10(max(max_size, 2)), 26)
+    ax_b.hist(group_sizes, bins=bins_b, color="#4c72b0",
+              edgecolor="white", linewidth=0.3)
+    ax_b.set_xscale("log")
+    ax_b.set_xlabel("Molecules per group")
+    ax_b.set_ylabel("Number of groups")
+    n_singletons = sum(1 for s in group_sizes if s == 1)
+    median_size = int(np.median(group_sizes))
+    ax_b.text(0.98, 0.98,
+              f"median size {median_size}\n"
+              f"{n_singletons} singletons "
+              f"({100 * n_singletons / len(group_sizes):.0f}\\%)",
+              transform=ax_b.transAxes, fontsize=7, color="grey",
+              ha="right", va="top")
+    ax_b.text(-0.14, 1.05, "(b)", transform=ax_b.transAxes,
+              fontsize=10, fontweight="bold", va="bottom")
+
+    # (c) UMAP coloured by group — top 20 groups shown.
+    # Ranks 1-10: filled coloured circles (tab10 palette).
+    # Ranks 11-20: filled coloured squares (same palette reused).
     top_k = 20
     counts = Counter(group_ids_45)
     top_groups = [g for g, _ in counts.most_common(top_k)]
@@ -184,50 +207,47 @@ def main():
     tab10 = plt.cm.tab10(np.linspace(0, 1, 10))
 
     mask_grey = np.array([g not in top_set for g in group_ids_45])
-    ax_b.scatter(coords[mask_grey, 0], coords[mask_grey, 1],
+    ax_c.scatter(coords[mask_grey, 0], coords[mask_grey, 1],
                  s=2.5, c="lightgrey", alpha=0.30,
                  edgecolor="none", rasterized=True)
 
     for rank, gid in enumerate(top_groups):
         mask = np.array([g == gid for g in group_ids_45])
         color = tab10[rank % 10]
-        if rank < 10:
-            # filled markers
-            ax_b.scatter(coords[mask, 0], coords[mask, 1],
-                         s=10, color=color,
-                         alpha=0.9, edgecolor="none", rasterized=True)
-        else:
-            # unfilled markers (ring only)
-            ax_b.scatter(coords[mask, 0], coords[mask, 1],
-                         s=14, facecolors="none", edgecolors=color,
-                         alpha=0.9, linewidths=0.7, rasterized=True)
+        marker = "o" if rank < 10 else "s"
+        ax_c.scatter(coords[mask, 0], coords[mask, 1],
+                     s=14, color=color, marker=marker,
+                     alpha=0.9, edgecolor="white", linewidths=0.25,
+                     rasterized=True)
 
-    ax_b.set_xticks([])
-    ax_b.set_yticks([])
-    ax_b.set_xlabel("UMAP 1")
-    ax_b.set_ylabel("UMAP 2")
-    ax_b.text(-0.18, 1.05, "(b)", transform=ax_b.transAxes,
+    ax_c.set_xticks([])
+    ax_c.set_yticks([])
+    ax_c.set_xlabel("UMAP 1")
+    ax_c.set_ylabel("UMAP 2")
+    ax_c.text(-0.14, 1.05, "(c)", transform=ax_c.transAxes,
               fontsize=10, fontweight="bold", va="bottom")
-    ax_b.text(0.98, 0.02,
-              f"{n_groups_45} groups\n(top 20 shown)",
-              transform=ax_b.transAxes, fontsize=7, color="grey",
+    ax_c.text(0.98, 0.02,
+              f"{n_groups_45} groups total\n"
+              f"(top 20 highlighted; circles = ranks 1\u201310,\n"
+              f"squares = ranks 11\u201320)",
+              transform=ax_c.transAxes, fontsize=6.5, color="grey",
               ha="right", va="bottom")
 
-    # (c) within vs between histograms
+    # (d) within vs between histograms
     bins = np.linspace(0, 1, 41)
-    ax_c.hist(between_sims, bins=bins, alpha=0.7, color="#c44e52",
+    ax_d.hist(between_sims, bins=bins, alpha=0.7, color="#c44e52",
               label="To a different group",
               edgecolor="none", density=True)
-    ax_c.hist(within_sims, bins=bins, alpha=0.8, color="#4c72b0",
+    ax_d.hist(within_sims, bins=bins, alpha=0.8, color="#4c72b0",
               label="To own group's representative",
               edgecolor="none", density=True)
-    ax_c.axvline(TAU, color="grey", linestyle="--", linewidth=0.7)
-    ax_c.set_xlabel("Tanimoto similarity")
-    ax_c.set_ylabel("Density")
-    ax_c.set_xlim(0, 1)
-    ax_c.legend(frameon=False, fontsize=6.5, loc="upper right",
+    ax_d.axvline(TAU, color="grey", linestyle="--", linewidth=0.7)
+    ax_d.set_xlabel("Tanimoto similarity")
+    ax_d.set_ylabel("Density")
+    ax_d.set_xlim(0, 1)
+    ax_d.legend(frameon=False, fontsize=6.5, loc="upper right",
                 handlelength=1.2, handletextpad=0.4)
-    ax_c.text(-0.18, 1.05, "(c)", transform=ax_c.transAxes,
+    ax_d.text(-0.14, 1.05, "(d)", transform=ax_d.transAxes,
               fontsize=10, fontweight="bold", va="bottom")
 
     fig.tight_layout()
