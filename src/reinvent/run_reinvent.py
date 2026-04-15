@@ -211,6 +211,9 @@ def main():
                         help="Disable scaffold diversity filter")
     parser.add_argument("--max_per_scaffold", type=int, default=25,
                         help="Max times a scaffold is rewarded before zeroing")
+    parser.add_argument("--diversity_mode", type=str, default="scaffold",
+                        choices=["scaffold", "brics"],
+                        help="Diversity key: 'scaffold' (Murcko) or 'brics' (fragment decomposition)")
     parser.add_argument("--replay_buffer_size", type=int, default=100,
                         help="Experience replay buffer size (0 to disable)")
     parser.add_argument("--replay_max_per_scaffold", type=int, default=10,
@@ -222,6 +225,8 @@ def main():
                         help="Enable Tanimoto niching penalty (WSGA-style)")
     parser.add_argument("--niching_tau", type=float, default=0.15,
                         help="Niching threshold (similarity below tau is penalty-free)")
+    parser.add_argument("--niching_alpha", type=float, default=1000,
+                        help="Niching penalty steepness (lower = gentler)")
     parser.add_argument("--niching_radius", type=int, default=8,
                         help="Morgan fingerprint radius for niching")
 
@@ -394,11 +399,13 @@ def main():
         device=device,
         diversity_filter=args.diversity_filter,
         max_per_scaffold=args.max_per_scaffold,
+        diversity_mode=args.diversity_mode,
         replay_buffer_size=args.replay_buffer_size,
         replay_max_per_scaffold=args.replay_max_per_scaffold,
         replay_fraction=args.replay_fraction,
         tanimoto_niching=args.tanimoto_niching,
         niching_tau=args.niching_tau,
+        niching_alpha=args.niching_alpha,
         niching_radius=args.niching_radius,
     )
 

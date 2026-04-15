@@ -19,7 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from rdkit import Chem, DataStructs
-from rdkit.Chem import rdFingerprintGenerator
+from rdkit.Chem import BRICS, rdFingerprintGenerator
 from rdkit.Chem.Scaffolds import MurckoScaffold
 from torch.utils.data import DataLoader, Dataset
 
@@ -158,30 +158,36 @@ def encode_batch(smiles_list, vocab, device="cpu"):
 # ─────────────────────────────────────────────
 
 class ScaffoldDiversityFilter:
-    """REINVENT 2.0 scaffold diversity filter (Blaschke et al. 2020).
+    """Diversity filter that tracks molecular keys and zeroes rewards
+    once a key has been rewarded max_per_key times.
 
-    Tracks scaffold counts across the entire run. Once a scaffold has been
-    rewarded max_per_scaffold times, subsequent molecules with that scaffold
-    get reward=0.
+    Supports two modes:
+      - 'scaffold' (REINVENT 2.0): generic Murcko scaffold
+      - 'brics': frozenset of BRICS fragment SMILES
     """
 
-    def __init__(self, max_per_scaffold=25):
+    def __init__(self, max_per_scaffold=25, mode="scaffold"):
         self.max_per_scaffold = max_per_scaffold
+        self.mode = mode
         self.scaffold_counts = defaultdict(int)
 
-    def _get_scaffold(self, smi):
+    def _get_key(self, smi):
         try:
             mol = Chem.MolFromSmiles(smi)
             if mol is None:
                 return "unknown"
-            scaffold = MurckoScaffold.MakeScaffoldGeneric(
-                MurckoScaffold.GetScaffoldForMol(mol))
-            return Chem.MolToSmiles(scaffold)
+            if self.mode == "brics":
+                frags = BRICS.BRICSDecompose(mol)
+                return frozenset(frags) if frags else "unknown"
+            else:
+                scaffold = MurckoScaffold.MakeScaffoldGeneric(
+                    MurckoScaffold.GetScaffoldForMol(mol))
+                return Chem.MolToSmiles(scaffold)
         except Exception:
             return "unknown"
 
     def filter_rewards(self, smiles_list, rewards):
-        """Zero out rewards for saturated scaffolds.
+        """Zero out rewards for saturated keys.
 
         Args:
             smiles_list: list of canonical SMILES (may contain None).
@@ -196,12 +202,12 @@ class ScaffoldDiversityFilter:
         for i, smi in enumerate(smiles_list):
             if smi is None or filtered[i] <= 0:
                 continue
-            scaffold = self._get_scaffold(smi)
-            if self.scaffold_counts[scaffold] >= self.max_per_scaffold:
+            key = self._get_key(smi)
+            if self.scaffold_counts[key] >= self.max_per_scaffold:
                 filtered[i] = 0.0
                 n_filtered += 1
             else:
-                self.scaffold_counts[scaffold] += 1
+                self.scaffold_counts[key] += 1
         return filtered, n_filtered
 
     @property
@@ -389,10 +395,12 @@ class ReinventTrainer:
                  sigma=0.5, lr=5e-5, batch_size=128, max_len=80,
                  device="cpu",
                  diversity_filter=True, max_per_scaffold=25,
+                 diversity_mode="scaffold",
                  replay_buffer_size=100, replay_max_per_scaffold=10,
                  replay_fraction=0.5,
                  tanimoto_niching=False, niching_tau=0.15,
-                 niching_radius=8, niching_ref_size=100):
+                 niching_alpha=1000, niching_radius=8,
+                 niching_ref_size=100):
         self.prior = prior          # frozen
         self.agent = agent          # trainable
         self.vocab = vocab
@@ -410,7 +418,8 @@ class ReinventTrainer:
 
         # Diversity mechanisms
         self.diversity_filter = (
-            ScaffoldDiversityFilter(max_per_scaffold=max_per_scaffold)
+            ScaffoldDiversityFilter(max_per_scaffold=max_per_scaffold,
+                                    mode=diversity_mode)
             if diversity_filter else None
         )
         self.replay_buffer = (
@@ -419,7 +428,8 @@ class ReinventTrainer:
             if replay_buffer_size > 0 else None
         )
         self.tanimoto_niching = (
-            TanimotoNichingFilter(tau=niching_tau, radius=niching_radius,
+            TanimotoNichingFilter(tau=niching_tau, alpha=niching_alpha,
+                                  radius=niching_radius,
                                   ref_size=niching_ref_size)
             if tanimoto_niching else None
         )
