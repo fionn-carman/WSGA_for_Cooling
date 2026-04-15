@@ -172,8 +172,8 @@ def main():
     print(f"  between-group (non-rep → other rep): {len(between_sims)}, "
           f"median {np.median(between_sims) if between_sims else 0:.2f}")
 
-    # ── figure (2 x 2 grid of square panels) ──
-    fig, axes = plt.subplots(2, 2, figsize=(8.5, 8.5), dpi=600)
+    # ── figure (2 x 2 grid of square panels, full manuscript column width) ──
+    fig, axes = plt.subplots(2, 2, figsize=(6.5, 6.5), dpi=600)
     ax_a, ax_b = axes[0]
     ax_c, ax_d = axes[1]
     for ax in axes.flat:
@@ -195,21 +195,11 @@ def main():
     max_display = 50
     bins_b = np.arange(0, max_display + 3, 2)  # width-2 bins
     displayed = group_sizes[group_sizes <= max_display]
-    n_above = int((group_sizes > max_display).sum())
     ax_b.hist(displayed, bins=bins_b, color="#4c72b0",
               edgecolor="white", linewidth=0.3)
     ax_b.set_xlabel("Molecules per group")
     ax_b.set_ylabel("Number of groups")
     ax_b.set_xlim(0, max_display + 2)
-    median_size = int(np.median(group_sizes))
-    mean_size = group_sizes.mean()
-    max_size = int(group_sizes.max())
-    ax_b.text(0.98, 0.98,
-              f"median {median_size}, mean {mean_size:.1f}\n"
-              f"{n_above} larger groups (max {max_size})\n"
-              f"beyond axis",
-              transform=ax_b.transAxes, fontsize=6.5, color="grey",
-              ha="right", va="top")
     tidy_axes(ax_b)
     ax_b.text(-0.14, 1.05, "(b)", transform=ax_b.transAxes,
               fontsize=9.5, fontweight="bold", va="bottom")
@@ -250,12 +240,6 @@ def main():
     ax_c.set_ylabel("UMAP 2")
     ax_c.text(-0.14, 1.05, "(c)", transform=ax_c.transAxes,
               fontsize=9.5, fontweight="bold", va="bottom")
-    ax_c.text(0.98, 0.02,
-              f"{n_groups_45} groups\n"
-              r"$\bullet$ ranks 1--10  "
-              r"$\blacksquare$ ranks 11--20",
-              transform=ax_c.transAxes, fontsize=6.5, color="grey",
-              ha="right", va="bottom")
 
     # (d) within vs between histograms
     bins = np.linspace(0, 1, 41)
