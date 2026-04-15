@@ -169,38 +169,38 @@ def main():
     xs = [t for t, _ in curve]
     ys = [n for _, n in curve]
     ax_a.plot(xs, ys, "o-", color="#4c72b0", markersize=4, linewidth=1.0)
-    ax_a.axvline(TAU, color="grey", linestyle="--", linewidth=0.7)
     ax_a.set_xlabel(r"Similarity threshold $\tau_{\mathrm{sim}}$")
     ax_a.set_ylabel("Number of groups")
     ax_a.text(-0.18, 1.05, "(a)", transform=ax_a.transAxes,
               fontsize=10, fontweight="bold", va="bottom")
 
-    # Annotate the chosen threshold
-    idx_tau = xs.index(TAU)
-    ax_a.annotate(f"$\\tau_{{\\mathrm{{sim}}}}={TAU}$\n({ys[idx_tau]} groups)",
-                  xy=(TAU, ys[idx_tau]),
-                  xytext=(TAU + 0.05, ys[idx_tau] + (max(ys) - min(ys)) * 0.15),
-                  fontsize=7, color="grey",
-                  arrowprops=dict(arrowstyle="-", color="grey", lw=0.5))
-
-    # (b) UMAP coloured by group at tau=0.45
-    top_k = 10
+    # (b) UMAP coloured by group — top 20 groups shown.
+    # First 10 groups: filled circles (tab10 palette).
+    # Next 10 groups:  unfilled circles (same colours, ring only).
+    top_k = 20
     counts = Counter(group_ids_45)
     top_groups = [g for g, _ in counts.most_common(top_k)]
     top_set = set(top_groups)
-    tab20 = plt.cm.tab20(np.linspace(0, 1, 20))
-    tab20b = plt.cm.tab20b(np.linspace(0, 1, 20))
-    palette = np.vstack([tab20, tab20b])
+    tab10 = plt.cm.tab10(np.linspace(0, 1, 10))
 
     mask_grey = np.array([g not in top_set for g in group_ids_45])
     ax_b.scatter(coords[mask_grey, 0], coords[mask_grey, 1],
-                 s=2.5, c="lightgrey", alpha=0.35,
+                 s=2.5, c="lightgrey", alpha=0.30,
                  edgecolor="none", rasterized=True)
+
     for rank, gid in enumerate(top_groups):
         mask = np.array([g == gid for g in group_ids_45])
-        ax_b.scatter(coords[mask, 0], coords[mask, 1],
-                     s=5, color=palette[rank % len(palette)],
-                     alpha=0.85, edgecolor="none", rasterized=True)
+        color = tab10[rank % 10]
+        if rank < 10:
+            # filled markers
+            ax_b.scatter(coords[mask, 0], coords[mask, 1],
+                         s=10, color=color,
+                         alpha=0.9, edgecolor="none", rasterized=True)
+        else:
+            # unfilled markers (ring only)
+            ax_b.scatter(coords[mask, 0], coords[mask, 1],
+                         s=14, facecolors="none", edgecolors=color,
+                         alpha=0.9, linewidths=0.7, rasterized=True)
 
     ax_b.set_xticks([])
     ax_b.set_yticks([])
@@ -209,7 +209,7 @@ def main():
     ax_b.text(-0.18, 1.05, "(b)", transform=ax_b.transAxes,
               fontsize=10, fontweight="bold", va="bottom")
     ax_b.text(0.98, 0.02,
-              f"{n_groups_45} groups\n(top 10 coloured)",
+              f"{n_groups_45} groups\n(top 20 shown)",
               transform=ax_b.transAxes, fontsize=7, color="grey",
               ha="right", va="bottom")
 
