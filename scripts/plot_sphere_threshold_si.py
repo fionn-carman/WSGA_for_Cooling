@@ -15,13 +15,14 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.ticker import MaxNLocator
 from rdkit import Chem, DataStructs, RDLogger
 from rdkit.Chem import rdFingerprintGenerator
 import umap
 
 RDLogger.DisableLog("rdApp.*")
 
-# Match the manuscript figure style guide
+# Match the manuscript figure style guide (feedback_manuscript_figure_style.md)
 plt.rcParams.update({
     "font.family": "serif",
     "font.serif": ["Times New Roman", "DejaVu Serif"],
@@ -29,6 +30,8 @@ plt.rcParams.update({
     "font.size": 7.5,
     "axes.labelsize": 8.5,
     "axes.linewidth": 0.5,
+    "xtick.labelsize": 6.5,
+    "ytick.labelsize": 6.5,
     "xtick.major.width": 0.4,
     "ytick.major.width": 0.4,
     "xtick.major.size": 2.5,
@@ -37,7 +40,14 @@ plt.rcParams.update({
     "ytick.direction": "in",
     "xtick.top": True,
     "ytick.right": True,
+    "legend.fontsize": 6.5,
 })
+
+
+def tidy_axes(ax, nbins=4):
+    """Apply manuscript-style tick reduction to x and y axes."""
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=nbins, prune="both"))
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=nbins, prune="both"))
 
 
 def fp_to_vec(fp):
@@ -162,10 +172,12 @@ def main():
     print(f"  between-group (non-rep → other rep): {len(between_sims)}, "
           f"median {np.median(between_sims) if between_sims else 0:.2f}")
 
-    # ── figure (2 x 2 layout) ──
-    fig, axes = plt.subplots(2, 2, figsize=(9.0, 6.6), dpi=150)
+    # ── figure (2 x 2 grid of square panels) ──
+    fig, axes = plt.subplots(2, 2, figsize=(8.5, 8.5), dpi=600)
     ax_a, ax_b = axes[0]
     ax_c, ax_d = axes[1]
+    for ax in axes.flat:
+        ax.set_box_aspect(1)
 
     # (a) number of groups vs threshold
     xs = [t for t, _ in curve]
@@ -173,29 +185,34 @@ def main():
     ax_a.plot(xs, ys, "o-", color="#4c72b0", markersize=4, linewidth=1.0)
     ax_a.set_xlabel(r"Similarity threshold $\tau_{\mathrm{sim}}$")
     ax_a.set_ylabel("Number of groups")
+    tidy_axes(ax_a)
     ax_a.text(-0.14, 1.05, "(a)", transform=ax_a.transAxes,
-              fontsize=10, fontweight="bold", va="bottom")
+              fontsize=9.5, fontweight="bold", va="bottom")
 
-    # (b) group-size histogram at tau_sim = TAU
-    group_sizes = [count for _, count in Counter(group_ids_45).most_common()]
-    max_size = max(group_sizes)
-    # Use log-spaced bins since size distribution is heavy-tailed
-    bins_b = np.logspace(0, np.log10(max(max_size, 2)), 26)
-    ax_b.hist(group_sizes, bins=bins_b, color="#4c72b0",
+    # (b) group-size histogram at tau_sim = TAU, linear, cropped tail
+    group_sizes = np.array([count for _, count in
+                            Counter(group_ids_45).most_common()])
+    max_display = 50
+    bins_b = np.arange(0, max_display + 3, 2)  # width-2 bins
+    displayed = group_sizes[group_sizes <= max_display]
+    n_above = int((group_sizes > max_display).sum())
+    ax_b.hist(displayed, bins=bins_b, color="#4c72b0",
               edgecolor="white", linewidth=0.3)
-    ax_b.set_xscale("log")
     ax_b.set_xlabel("Molecules per group")
     ax_b.set_ylabel("Number of groups")
-    n_singletons = sum(1 for s in group_sizes if s == 1)
+    ax_b.set_xlim(0, max_display + 2)
     median_size = int(np.median(group_sizes))
+    mean_size = group_sizes.mean()
+    max_size = int(group_sizes.max())
     ax_b.text(0.98, 0.98,
-              f"median size {median_size}\n"
-              f"{n_singletons} singletons "
-              f"({100 * n_singletons / len(group_sizes):.0f}\\%)",
-              transform=ax_b.transAxes, fontsize=7, color="grey",
+              f"median {median_size}, mean {mean_size:.1f}\n"
+              f"{n_above} larger groups (max {max_size})\n"
+              f"beyond axis",
+              transform=ax_b.transAxes, fontsize=6.5, color="grey",
               ha="right", va="top")
+    tidy_axes(ax_b)
     ax_b.text(-0.14, 1.05, "(b)", transform=ax_b.transAxes,
-              fontsize=10, fontweight="bold", va="bottom")
+              fontsize=9.5, fontweight="bold", va="bottom")
 
     # (c) UMAP coloured by group — top 20 groups shown.
     # Ranks 1-10: filled coloured circles (tab10 palette).
@@ -214,22 +231,29 @@ def main():
     for rank, gid in enumerate(top_groups):
         mask = np.array([g == gid for g in group_ids_45])
         color = tab10[rank % 10]
-        marker = "o" if rank < 10 else "s"
-        ax_c.scatter(coords[mask, 0], coords[mask, 1],
-                     s=14, color=color, marker=marker,
-                     alpha=0.9, edgecolor="white", linewidths=0.25,
-                     rasterized=True)
+        if rank < 10:
+            # Circles: filled colour, white edge
+            ax_c.scatter(coords[mask, 0], coords[mask, 1],
+                         s=18, color=color, marker="o",
+                         alpha=0.95, edgecolor="white", linewidths=0.35,
+                         rasterized=True)
+        else:
+            # Squares: filled colour, black edge, smaller
+            ax_c.scatter(coords[mask, 0], coords[mask, 1],
+                         s=12, color=color, marker="s",
+                         alpha=0.95, edgecolor="black", linewidths=0.4,
+                         rasterized=True)
 
     ax_c.set_xticks([])
     ax_c.set_yticks([])
     ax_c.set_xlabel("UMAP 1")
     ax_c.set_ylabel("UMAP 2")
     ax_c.text(-0.14, 1.05, "(c)", transform=ax_c.transAxes,
-              fontsize=10, fontweight="bold", va="bottom")
+              fontsize=9.5, fontweight="bold", va="bottom")
     ax_c.text(0.98, 0.02,
-              f"{n_groups_45} groups total\n"
-              f"(top 20 highlighted; circles = ranks 1\u201310,\n"
-              f"squares = ranks 11\u201320)",
+              f"{n_groups_45} groups\n"
+              r"$\bullet$ ranks 1--10  "
+              r"$\blacksquare$ ranks 11--20",
               transform=ax_c.transAxes, fontsize=6.5, color="grey",
               ha="right", va="bottom")
 
@@ -247,14 +271,15 @@ def main():
     ax_d.set_xlim(0, 1)
     ax_d.legend(frameon=False, fontsize=6.5, loc="upper right",
                 handlelength=1.2, handletextpad=0.4)
+    tidy_axes(ax_d)
     ax_d.text(-0.14, 1.05, "(d)", transform=ax_d.transAxes,
-              fontsize=10, fontweight="bold", va="bottom")
+              fontsize=9.5, fontweight="bold", va="bottom")
 
     fig.tight_layout()
     out_pdf = os.path.join(out_dir, "sphere_threshold_si.pdf")
     out_png = os.path.join(out_dir, "sphere_threshold_si.png")
     fig.savefig(out_pdf, bbox_inches="tight")
-    fig.savefig(out_png, bbox_inches="tight", dpi=200)
+    fig.savefig(out_png, bbox_inches="tight", dpi=300)
     print(f"Saved: {out_pdf}")
     print(f"Saved: {out_png}")
 
