@@ -411,9 +411,22 @@ def main():
 
     tracking_data = []
     generation_stats = []
+    batch_stats = []
 
     for step in range(args.rl_steps):
         metrics = trainer.step()
+
+        # Track per-batch diversity metrics every step
+        batch_stats.append({
+            "step": step,
+            "n_unique_batch": metrics["n_unique_batch"],
+            "n_new": metrics["n_new"],
+            "n_parseable": metrics["n_valid"],
+            "n_valid_constraint": metrics["n_valid_constraint"],
+            "batch_best_valid": metrics["batch_best_valid"],
+            "best_valid_total": metrics["best_fitness"],
+            "reward_mean": metrics["reward_mean"],
+        })
 
         # --- Log progress ---
         if step % args.log_interval == 0 or step == args.rl_steps - 1:
@@ -439,6 +452,7 @@ def main():
                 f"best={metrics['best_fitness']:.2f} "
                 f"stag={metrics['steps_since_improvement']}"
                 f"{div_str} "
+                f"uniqBatch={metrics['n_unique_batch']}/{args.batch_size} "
                 f"({metrics['elapsed']:.1f}s)"
             )
 
@@ -461,6 +475,10 @@ def main():
         if step % 50 == 0 and step > 0:
             pd.DataFrame(tracking_data).to_csv(top_n_path, index=False)
             pd.DataFrame(generation_stats).to_csv(gen_stats_path, index=False)
+            pd.DataFrame(batch_stats).to_csv(
+                os.path.join(args.output_dir, "batch_stats.csv"), index=False)
+            pd.DataFrame(trainer.batch_log).to_csv(
+                os.path.join(args.output_dir, "batch_log.csv"), index=False)
 
         # --- Convergence check ---
         if metrics["steps_since_improvement"] >= args.convergence_patience:
@@ -485,6 +503,16 @@ def main():
     # Generation stats
     pd.DataFrame(generation_stats).to_csv(gen_stats_path, index=False)
     print(f"Generation stats: {gen_stats_path}")
+
+    # Per-batch diversity stats
+    batch_stats_path = os.path.join(args.output_dir, "batch_stats.csv")
+    pd.DataFrame(batch_stats).to_csv(batch_stats_path, index=False)
+    print(f"Batch stats: {batch_stats_path}")
+
+    # Full batch log (all 128 molecules per step, including duplicates)
+    batch_log_path = os.path.join(args.output_dir, "batch_log.csv")
+    pd.DataFrame(trainer.batch_log).to_csv(batch_log_path, index=False)
+    print(f"Batch log ({len(trainer.batch_log)} rows): {batch_log_path}")
 
     # Agent weights
     agent_path = os.path.join(args.output_dir, "agent.pt")

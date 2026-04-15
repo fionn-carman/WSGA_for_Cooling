@@ -2,7 +2,7 @@
 #PBS -N reinvent_div
 #PBS -l walltime=48:00:00
 #PBS -l select=1:ncpus=1:mem=32gb
-#PBS -J 0-14
+#PBS -J 0-19
 #PBS -o /dev/null
 #PBS -e /dev/null
 
@@ -12,14 +12,11 @@ set -o pipefail
 # REINVENT Diversity Mechanism Comparison
 # ============================================================
 #
-# 3 conditions x 5 seeds = 15 jobs:
-#   0-4:   BRICS filter (max=25, no niching)
-#   5-9:   Gentle Tanimoto niching (alpha=100, tau=0.25, no filter)
-#  10-14:  BRICS filter + gentle niching (both)
-#
-# Baseline comparisons from scaffold sweep:
-#   - scaffold filter (mps=25) — default REINVENT
-#   - no diversity — scaffold sweep "disabled" condition
+# 4 conditions x 5 seeds = 20 jobs:
+#   0-4:   Vanilla (no diversity filter, no niching) — baseline
+#   5-9:   BRICS filter (max=25, no niching)
+#  10-14:  Gentle Tanimoto niching (alpha=100, tau=0.25, no filter)
+#  15-19:  BRICS filter + gentle niching (both)
 #
 # Usage:
 #   qsub reinvent_diversity_comparison.sh
@@ -41,6 +38,9 @@ fi
 
 eval "$(~/miniforge3/bin/conda shell.bash hook)"
 conda activate mol-rl
+
+# Force unbuffered Python output so per-step logs appear live
+export PYTHONUNBUFFERED=1
 cd "$DIRECTORY"
 
 export KMP_DUPLICATE_LIB_OK=TRUE
@@ -73,16 +73,21 @@ TOX_THRESHOLD=3
 # ==============================
 case $CONDITION in
     0)
+        LABEL="vanilla"
+        DIVERSITY_FLAGS="--no_diversity_filter"
+        NICHING_FLAGS=""
+        ;;
+    1)
         LABEL="brics"
         DIVERSITY_FLAGS="--diversity_filter --diversity_mode brics --max_per_scaffold 25"
         NICHING_FLAGS=""
         ;;
-    1)
+    2)
         LABEL="gentle_niching"
         DIVERSITY_FLAGS="--no_diversity_filter"
         NICHING_FLAGS="--tanimoto_niching --niching_tau 0.25 --niching_alpha 100"
         ;;
-    2)
+    3)
         LABEL="brics_niching"
         DIVERSITY_FLAGS="--diversity_filter --diversity_mode brics --max_per_scaffold 25"
         NICHING_FLAGS="--tanimoto_niching --niching_tau 0.25 --niching_alpha 100"

@@ -440,6 +440,7 @@ class ReinventTrainer:
         self.best_fitness = -float("inf")
         self.best_smiles = None
         self.steps_since_improvement = 0
+        self.batch_log = []  # all 128 molecules per step (for post-hoc analysis)
 
     def step(self):
         """Execute one REINVENT fine-tuning step.
@@ -606,14 +607,31 @@ class ReinventTrainer:
         else:
             self.steps_since_improvement += 1
 
-        n_valid = sum(parseable_mask)
+        n_parseable = sum(parseable_mask)
+        n_valid_constraint = int((raw_rewards > 0).sum())
+
+        # Log all molecules in this batch (for post-hoc diversity analysis)
+        for i in range(len(smiles)):
+            self.batch_log.append({
+                "step": self.step_count,
+                "SMILES": canonical[i] if canonical[i] else smiles[i],
+                "FitnessScore": float(raw_rewards[i]),
+                "is_valid": int(raw_rewards[i] > 0),
+                "is_parseable": int(parseable_mask[i]),
+            })
+
+        n_unique_batch = len(set(
+            c for c in canonical if c is not None))
+
         elapsed = time.time() - t0
 
         metrics = {
             "reward_mean": float(rewards.mean()),
             "reward_max": float(rewards.max()),
             "loss": float(loss.item()),
-            "n_valid": n_valid,
+            "n_valid": n_parseable,
+            "n_valid_constraint": n_valid_constraint,
+            "batch_best_valid": batch_best,
             "n_new": len(new_smiles),
             "n_unique_total": self.n_unique_evaluated,
             "best_fitness": self.best_fitness,
@@ -630,6 +648,7 @@ class ReinventTrainer:
             "niching_penalty": niching_penalty,
             "replay_size": len(self.replay_buffer)
                            if self.replay_buffer else 0,
+            "n_unique_batch": n_unique_batch,
         }
         return metrics
 
