@@ -1,12 +1,16 @@
 """Compute diversity metrics at three population levels for a single run.
 
 For each run directory, computes at three levels (global, valid, top 25):
-  - Mean pairwise Tanimoto similarity (Morgan r=8, 2048 bits, sampled)
+  - Mean pairwise Tanimoto similarity (Morgan fingerprint, 2048 bits, sampled)
   - Unique BRICS fragments
+  - Unique Murcko generic scaffolds
   - Functional group breakdown (ether/ester/carbonate) [valid only]
 
+The fingerprint radius used for the Tanimoto computation is configurable via
+--fp_radius (default 2, matching the WSGA niching production radius).
+
 Usage:
-    python compute_diversity_levels.py <run_dir>
+    python compute_diversity_levels.py <run_dir> [--fp_radius 2]
 """
 
 import argparse
@@ -15,6 +19,7 @@ import numpy as np
 import pandas as pd
 from rdkit import Chem, DataStructs
 from rdkit.Chem import BRICS, AllChem
+from rdkit.Chem.Scaffolds import MurckoScaffold
 
 
 def load_populations(csv_path, mp_hard=-30):
@@ -44,8 +49,9 @@ def load_populations(csv_path, mp_hard=-30):
     return global_smi, valid_smi, top25_smi
 
 
-def mean_pairwise_ts(smiles_arr, n_sample=3000, n_pairs=100000, seed=42):
-    """Mean pairwise Tanimoto (Morgan r=8, 2048 bits) from a random sample."""
+def mean_pairwise_ts(smiles_arr, fp_radius=2,
+                     n_sample=3000, n_pairs=100000, seed=42):
+    """Mean pairwise Tanimoto (Morgan, 2048 bits) from a random sample."""
     rng = np.random.default_rng(seed)
     arr = smiles_arr
     if len(arr) > n_sample:
@@ -55,7 +61,8 @@ def mean_pairwise_ts(smiles_arr, n_sample=3000, n_pairs=100000, seed=42):
     for smi in arr:
         mol = Chem.MolFromSmiles(smi)
         if mol:
-            fps.append(AllChem.GetMorganFingerprintAsBitVect(mol, 8, nBits=2048))
+            fps.append(AllChem.GetMorganFingerprintAsBitVect(
+                mol, fp_radius, nBits=2048))
 
     if len(fps) < 2:
         return np.nan
@@ -88,6 +95,22 @@ def count_brics(smiles_arr):
     return len(frags)
 
 
+def count_murcko(smiles_arr):
+    """Return number of unique Murcko generic scaffolds."""
+    scaffolds = set()
+    for smi in smiles_arr:
+        mol = Chem.MolFromSmiles(smi)
+        if mol is None:
+            continue
+        try:
+            scaf = MurckoScaffold.MakeScaffoldGeneric(
+                MurckoScaffold.GetScaffoldForMol(mol))
+            scaffolds.add(Chem.MolToSmiles(scaf))
+        except Exception:
+            pass
+    return len(scaffolds)
+
+
 def compute_func_groups(smiles_arr):
     """Count ether/ester/carbonate."""
     pat_carbonate = Chem.MolFromSmarts("[OX2]C(=O)[OX2]")
@@ -111,6 +134,12 @@ def compute_func_groups(smiles_arr):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("run_dir")
+    parser.add_argument("--fp_radius", type=int, default=2,
+                        help="Morgan fingerprint radius for TS "
+                             "(default 2, matching WSGA niching production)")
+    parser.add_argument("--output_name", type=str,
+                        default="diversity_levels.csv",
+                        help="Output CSV filename inside run_dir")
     args = parser.parse_args()
 
     csv_path = os.path.join(args.run_dir, "all_evaluated_molecules.csv")
@@ -119,21 +148,25 @@ def main():
         return
 
     dirname = os.path.basename(os.path.normpath(args.run_dir))
-    print(f"Processing {dirname} ...")
+    print(f"Processing {dirname} (fp_radius={args.fp_radius}) ...")
 
     global_smi, valid_smi, top25_smi = load_populations(csv_path)
     print(f"  Global: {len(global_smi):,}  Valid: {len(valid_smi):,}  Top25: {len(top25_smi)}")
 
-    result = {"dir": dirname}
+    result = {"dir": dirname, "fp_radius": args.fp_radius}
 
     for label, arr in [("top25", top25_smi), ("valid", valid_smi), ("global", global_smi)]:
         print(f"  [{label}] Tanimoto ...")
-        result[f"ts_{label}"] = mean_pairwise_ts(arr)
+        result[f"ts_{label}"] = mean_pairwise_ts(arr, fp_radius=args.fp_radius)
         print(f"    TS = {result[f'ts_{label}']:.4f}")
 
         print(f"  [{label}] BRICS ...")
         result[f"brics_{label}"] = count_brics(arr)
         print(f"    {result[f'brics_{label}']} fragments")
+
+        print(f"  [{label}] Murcko ...")
+        result[f"murcko_{label}"] = count_murcko(arr)
+        print(f"    {result[f'murcko_{label}']} scaffolds")
 
     result["n_global"] = len(global_smi)
     result["n_valid"] = len(valid_smi)
@@ -143,7 +176,7 @@ def main():
     for k, v in fg.items():
         result[f"fg_{k}"] = v
 
-    out_path = os.path.join(args.run_dir, "diversity_levels.csv")
+    out_path = os.path.join(args.run_dir, args.output_name)
     pd.DataFrame([result]).to_csv(out_path, index=False)
     print(f"  Saved: {out_path}")
 
