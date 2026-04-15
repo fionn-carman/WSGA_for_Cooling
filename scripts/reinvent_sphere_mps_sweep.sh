@@ -21,8 +21,10 @@ set -o pipefail
 #  25-29:  no filter (baseline)
 #
 # Fingerprint: Morgan radius 2 (ECFP4), matching WSGA niching production.
-# Sphere threshold: 0.45 Tanimoto — empirically tuned for family-level
-# clustering on the REINVENT output distribution (mean cluster size ~7).
+# Sphere threshold: 0.35 Tanimoto — gives ~981 groups on the NIST 8100 CHO
+# corpus (mean ~8 molecules per group), matching typical family sizes while
+# reliably trapping one-atom chain-length and branching variants (which have
+# Tanimoto similarity ~0.75-0.85, well above the threshold).
 #
 # All other HPs are identical to the BRICS mps sweep (reinvent_brics_mps_sweep.sh):
 #   sigma=1.0, lr=5e-5, batch=128, replay=100, rl_steps=5000, patience=200,
@@ -78,7 +80,7 @@ SC_THRESHOLD=3
 TOX_THRESHOLD=3
 
 # Sphere-mode defaults (both fixed for this sweep)
-SPHERE_THRESHOLD=0.45
+SPHERE_THRESHOLD=0.35
 SPHERE_FP_RADIUS=2
 
 case $CONDITION in

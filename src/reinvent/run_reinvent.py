@@ -216,7 +216,7 @@ def main():
                         help="Diversity key: 'scaffold' (Murcko), 'brics' "
                              "(fragment decomposition), or 'sphere' (Tanimoto "
                              "sphere exclusion on Morgan fingerprints)")
-    parser.add_argument("--tanimoto_threshold", type=float, default=0.45,
+    parser.add_argument("--tanimoto_threshold", type=float, default=0.35,
                         help="Sphere mode: Tanimoto similarity threshold; "
                              "molecules above this join the same sphere")
     parser.add_argument("--tanimoto_fp_radius", type=int, default=2,

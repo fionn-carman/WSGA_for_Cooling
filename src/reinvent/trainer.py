@@ -178,7 +178,7 @@ class ScaffoldDiversityFilter:
     """
 
     def __init__(self, max_per_scaffold=25, mode="scaffold",
-                 tanimoto_threshold=0.45, tanimoto_fp_radius=2):
+                 tanimoto_threshold=0.35, tanimoto_fp_radius=2):
         self.max_per_scaffold = max_per_scaffold
         self.mode = mode
         self.tanimoto_threshold = tanimoto_threshold
@@ -461,7 +461,7 @@ class ReinventTrainer:
                  device="cpu",
                  diversity_filter=True, max_per_scaffold=25,
                  diversity_mode="scaffold",
-                 tanimoto_threshold=0.45, tanimoto_fp_radius=2,
+                 tanimoto_threshold=0.35, tanimoto_fp_radius=2,
                  replay_buffer_size=100, replay_max_per_scaffold=10,
                  replay_fraction=0.5,
                  tanimoto_niching=False, niching_tau=0.15,
