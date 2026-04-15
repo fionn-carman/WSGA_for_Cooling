@@ -161,17 +161,40 @@ class ScaffoldDiversityFilter:
     """Diversity filter that tracks molecular keys and zeroes rewards
     once a key has been rewarded max_per_key times.
 
-    Supports two modes:
-      - 'scaffold' (REINVENT 2.0): generic Murcko scaffold
+    Supports three modes:
+      - 'scaffold' (REINVENT 2.0 default): generic Murcko scaffold string
       - 'brics': frozenset of BRICS fragment SMILES
+      - 'sphere': greedy Tanimoto sphere exclusion on Morgan fingerprints
+        (leader clustering, the streaming variant of Butina 1999)
+
+    For 'scaffold' and 'brics' modes, the key is hashable and stored in a
+    defaultdict. For 'sphere' mode, each "key" is a representative Morgan
+    fingerprint stored in a list; a new molecule joins the sphere of its
+    nearest representative if Tanimoto >= tanimoto_threshold, otherwise it
+    spawns a new representative. This groups molecules that are within a
+    Tanimoto radius of a centroid, which replaces Murcko scaffolding for
+    acyclic chemistries (where Murcko collapses 68% of molecules into a
+    single empty-scaffold bucket).
     """
 
-    def __init__(self, max_per_scaffold=25, mode="scaffold"):
+    def __init__(self, max_per_scaffold=25, mode="scaffold",
+                 tanimoto_threshold=0.45, tanimoto_fp_radius=2):
         self.max_per_scaffold = max_per_scaffold
         self.mode = mode
+        self.tanimoto_threshold = tanimoto_threshold
+        self.tanimoto_fp_radius = tanimoto_fp_radius
+        # Shared with scaffold / brics modes
         self.scaffold_counts = defaultdict(int)
         self.n_unknown_assigned = 0
         self.n_unknown_filtered = 0
+        # Sphere mode state
+        self._sphere_reps = []          # list of representative fingerprints
+        self._sphere_counts = []        # count per representative
+        self._sphere_fp_gen = (
+            rdFingerprintGenerator.GetMorganGenerator(
+                radius=tanimoto_fp_radius, fpSize=2048)
+            if mode == "sphere" else None
+        )
 
     def _get_key(self, smi):
         try:
@@ -188,8 +211,33 @@ class ScaffoldDiversityFilter:
         except Exception:
             return "unknown"
 
+    def _assign_sphere(self, smi):
+        """Sphere-mode assignment. Returns (rep_idx, saturated) where
+        rep_idx is the index of the sphere the molecule joined (or spawned)
+        and saturated is True if that sphere is already at its cap.
+        """
+        mol = Chem.MolFromSmiles(smi)
+        if mol is None:
+            return None, False
+        try:
+            fp = self._sphere_fp_gen.GetFingerprint(mol)
+        except Exception:
+            return None, False
+        if self._sphere_reps:
+            sims = DataStructs.BulkTanimotoSimilarity(fp, self._sphere_reps)
+            best = int(np.argmax(sims))
+            if sims[best] >= self.tanimoto_threshold:
+                if self._sphere_counts[best] >= self.max_per_scaffold:
+                    return best, True
+                self._sphere_counts[best] += 1
+                return best, False
+        # No existing sphere accepts this molecule — spawn a new one
+        self._sphere_reps.append(fp)
+        self._sphere_counts.append(1)
+        return len(self._sphere_reps) - 1, False
+
     def filter_rewards(self, smiles_list, rewards):
-        """Zero out rewards for saturated keys.
+        """Zero out rewards for saturated keys / spheres.
 
         Args:
             smiles_list: list of canonical SMILES (may contain None).
@@ -203,6 +251,12 @@ class ScaffoldDiversityFilter:
         n_filtered = 0
         for i, smi in enumerate(smiles_list):
             if smi is None or filtered[i] <= 0:
+                continue
+            if self.mode == "sphere":
+                _, saturated = self._assign_sphere(smi)
+                if saturated:
+                    filtered[i] = 0.0
+                    n_filtered += 1
                 continue
             key = self._get_key(smi)
             if self.scaffold_counts[key] >= self.max_per_scaffold:
@@ -218,10 +272,15 @@ class ScaffoldDiversityFilter:
 
     @property
     def n_scaffolds(self):
+        if self.mode == "sphere":
+            return len(self._sphere_reps)
         return len(self.scaffold_counts)
 
     @property
     def n_saturated(self):
+        if self.mode == "sphere":
+            return sum(1 for c in self._sphere_counts
+                       if c >= self.max_per_scaffold)
         return sum(
             1 for c in self.scaffold_counts.values()
             if c >= self.max_per_scaffold
@@ -402,6 +461,7 @@ class ReinventTrainer:
                  device="cpu",
                  diversity_filter=True, max_per_scaffold=25,
                  diversity_mode="scaffold",
+                 tanimoto_threshold=0.45, tanimoto_fp_radius=2,
                  replay_buffer_size=100, replay_max_per_scaffold=10,
                  replay_fraction=0.5,
                  tanimoto_niching=False, niching_tau=0.15,
@@ -424,8 +484,12 @@ class ReinventTrainer:
 
         # Diversity mechanisms
         self.diversity_filter = (
-            ScaffoldDiversityFilter(max_per_scaffold=max_per_scaffold,
-                                    mode=diversity_mode)
+            ScaffoldDiversityFilter(
+                max_per_scaffold=max_per_scaffold,
+                mode=diversity_mode,
+                tanimoto_threshold=tanimoto_threshold,
+                tanimoto_fp_radius=tanimoto_fp_radius,
+            )
             if diversity_filter else None
         )
         self.replay_buffer = (

@@ -212,8 +212,16 @@ def main():
     parser.add_argument("--max_per_scaffold", type=int, default=25,
                         help="Max times a scaffold is rewarded before zeroing")
     parser.add_argument("--diversity_mode", type=str, default="scaffold",
-                        choices=["scaffold", "brics"],
-                        help="Diversity key: 'scaffold' (Murcko) or 'brics' (fragment decomposition)")
+                        choices=["scaffold", "brics", "sphere"],
+                        help="Diversity key: 'scaffold' (Murcko), 'brics' "
+                             "(fragment decomposition), or 'sphere' (Tanimoto "
+                             "sphere exclusion on Morgan fingerprints)")
+    parser.add_argument("--tanimoto_threshold", type=float, default=0.45,
+                        help="Sphere mode: Tanimoto similarity threshold; "
+                             "molecules above this join the same sphere")
+    parser.add_argument("--tanimoto_fp_radius", type=int, default=2,
+                        help="Sphere mode: Morgan fingerprint radius (default 2, "
+                             "matching WSGA niching production)")
     parser.add_argument("--replay_buffer_size", type=int, default=100,
                         help="Experience replay buffer size (0 to disable)")
     parser.add_argument("--replay_max_per_scaffold", type=int, default=10,
@@ -400,6 +408,8 @@ def main():
         diversity_filter=args.diversity_filter,
         max_per_scaffold=args.max_per_scaffold,
         diversity_mode=args.diversity_mode,
+        tanimoto_threshold=args.tanimoto_threshold,
+        tanimoto_fp_radius=args.tanimoto_fp_radius,
         replay_buffer_size=args.replay_buffer_size,
         replay_max_per_scaffold=args.replay_max_per_scaffold,
         replay_fraction=args.replay_fraction,
