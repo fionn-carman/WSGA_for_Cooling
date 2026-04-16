@@ -642,12 +642,11 @@ def rank_candidates(df, out_dir):
     deduped = df.sort_values("fom1_40C", ascending=False)
     deduped = deduped.drop_duplicates(subset=["SMILES"], keep="first")
 
-    above_baseline = deduped[deduped["fom1_40C"] > BASELINE_BEST_FOM1].copy()
-    print(f"\n  Molecules above baseline ({BASELINE_BEST_FOM1}): {len(above_baseline)}")
+    n_above = (deduped["fom1_40C"] > BASELINE_BEST_FOM1).sum()
+    print(f"\n  Molecules above baseline ({BASELINE_BEST_FOM1}): {n_above}")
 
-    if above_baseline.empty:
-        print("  No molecules above baseline, lowering threshold to top 50")
-        above_baseline = deduped.head(50).copy()
+    above_baseline = deduped.head(max(50, n_above)).copy()
+    print(f"  Ranking top {len(above_baseline)} candidates")
 
     critical_ood = [c for c in CRITICAL_OOD_COLS if c in above_baseline.columns]
     noncritical_ood = [c for c in ALL_OOD_COLS
@@ -842,7 +841,11 @@ def main():
     print(summary.to_string(index=False))
 
     total_unique = df.drop_duplicates(subset=["SMILES"]).shape[0]
-    total_evaluated = df["total_evaluated"].sum() if "total_evaluated" in df.columns else "N/A"
+    if "total_evaluated" in df.columns:
+        per_run = df.groupby(["fp_label", "cost_level", "seed"])["total_evaluated"].first()
+        total_evaluated = per_run.sum()
+    else:
+        total_evaluated = "N/A"
     print(f"\n  Total unique valid molecules across all runs: {total_unique:,}")
     print(f"  Total molecules evaluated (incl. invalid): {total_evaluated:,.0f}")
 
