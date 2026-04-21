@@ -235,8 +235,8 @@ def main():
         print(f"  Tier {t}: {n}")
 
     # ── Save full CSV ───────────────────────────────────────────
-    save_cols = ["SMILES", "fom1_40C", "fp_C", "MolPrice", "source",
-                 "is_novel", "tier"]
+    save_cols = ["SMILES", "fom1_40C", "fp_C", "dc", "mp", "MolPrice",
+                 "source", "is_novel", "tier"]
     for prop in ["fom1_40C", "dc", "fp", "mp"]:
         save_cols += [MD_COL[prop], f"zone_{prop}", f"expMAE_{prop}"]
     deduped[save_cols].to_csv(OUT_DIR / "full_pareto_with_md.csv", index=False)
@@ -276,22 +276,25 @@ def generate_latex_table(df):
         return "W" if src == "WSGA" else "R"
 
     def write_table(sub, path, caption, label):
+        HEADER = (r"T & SMILES & FOM1 & FP & $\varepsilon$ & $T_\mathrm{m}$"
+                  r" & \$ & Src"
+                  r" & $d_\mathrm{F}$ & $d_\varepsilon$"
+                  r" & $d_\mathrm{FP}$ & $d_\mathrm{m}$")
+        COL_SPEC = (r"cl@{\hskip 4pt}r@{\hskip 4pt}r@{\hskip 4pt}"
+                    r"r@{\hskip 4pt}r@{\hskip 4pt}r@{\hskip 4pt}c"
+                    r"@{\hskip 3pt}c@{\hskip 3pt}c@{\hskip 3pt}c@{\hskip 3pt}c")
         with open(path, "w") as f:
-            f.write(r"\begin{longtable}{clrrrccccc}" + "\n")
+            f.write(r"\begin{scriptsize}" + "\n")
+            f.write(r"\setlength{\tabcolsep}{3pt}" + "\n")
+            f.write(r"\begin{longtable}{" + COL_SPEC + r"}" + "\n")
             f.write(r"\caption{" + caption + r"}" + "\n")
             f.write(r"\label{" + label + r"} \\" + "\n")
             f.write(r"\toprule" + "\n")
-            f.write(r"Tier & SMILES & FOM1 & FP / \si{\degreeCelsius} & "
-                    r"MolPrice & Source & "
-                    r"$\mathrm{MD_{FOM1}}$ & $\mathrm{MD_{DC}}$ & "
-                    r"$\mathrm{MD_{FP}}$ & $\mathrm{MD_{MP}}$ \\" + "\n")
+            f.write(HEADER + r" \\" + "\n")
             f.write(r"\midrule" + "\n")
             f.write(r"\endfirsthead" + "\n")
             f.write(r"\toprule" + "\n")
-            f.write(r"Tier & SMILES & FOM1 & FP / \si{\degreeCelsius} & "
-                    r"MolPrice & Source & "
-                    r"$\mathrm{MD_{FOM1}}$ & $\mathrm{MD_{DC}}$ & "
-                    r"$\mathrm{MD_{FP}}$ & $\mathrm{MD_{MP}}$ \\" + "\n")
+            f.write(HEADER + r" \\" + "\n")
             f.write(r"\midrule" + "\n")
             f.write(r"\endhead" + "\n")
             f.write(r"\bottomrule" + "\n")
@@ -299,7 +302,7 @@ def generate_latex_table(df):
 
             for _, row in sub.iterrows():
                 smi = row.SMILES.replace("_", r"\_")
-                smi_tex = r"\texttt{" + smi + "}"
+                smi_tex = r"{\ttfamily " + smi + "}"
                 z_fom1 = fmt_zone(row.zone_fom1_40C)
                 z_dc = fmt_zone(row.zone_dc)
                 z_fp = fmt_zone(row.zone_fp)
@@ -307,7 +310,8 @@ def generate_latex_table(df):
                 src = fmt_source(row.source)
                 f.write(
                     f"  {row.tier} & {smi_tex} & {row.fom1_40C:.1f} & "
-                    f"{row.fp_C:.0f} & {row.MolPrice:.1f} & {src} & "
+                    f"{row.fp_C:.0f} & {row.dc:.1f} & {row.mp:.0f} & "
+                    f"{row.MolPrice:.1f} & {src} & "
                     f"{z_fom1}{row[MD_COL['fom1_40C']]:.1f} & "
                     f"{z_dc}{row[MD_COL['dc']]:.1f} & "
                     f"{z_fp}{row[MD_COL['fp']]:.1f} & "
@@ -316,6 +320,7 @@ def generate_latex_table(df):
                 )
 
             f.write(r"\end{longtable}" + "\n")
+            f.write(r"\end{scriptsize}" + "\n")
 
     tier12 = df[df.tier <= 2]
     tier3 = df[df.tier == 3]
@@ -324,10 +329,14 @@ def generate_latex_table(df):
         tier12,
         OUT_DIR / "pareto_tier12_table.tex",
         "Tier~1 and Tier~2 Pareto-optimal molecules from WSGA and REINVENT "
-        "production sweeps, ranked by prediction reliability. Mahalanobis distance "
-        "cells are coloured by zone: green (MD~$<$~$p_{90}$), amber "
-        "($p_{90}$--$p_{95}$), red ($>$~$p_{95}$). Source: W~=~WSGA only, "
-        "R~=~REINVENT only, W+R~=~both methods.",
+        "production sweeps, ranked by prediction reliability. "
+        "FP: predicted flash point (\\SI{}{\\degreeCelsius}); "
+        "$\\varepsilon$: predicted dielectric constant; "
+        "$T_\\mathrm{m}$: predicted melting point (\\SI{}{\\degreeCelsius}); "
+        "\\$: MolPrice (log(\\$/mmol)). "
+        "Mahalanobis distance columns ($d$) are coloured by zone: "
+        "green (MD~$<$~$p_{90}$), amber ($p_{90}$--$p_{95}$), red ($>$~$p_{95}$). "
+        "Source: W~=~WSGA only, R~=~REINVENT only, W+R~=~both methods.",
         "tab:pareto_tier12",
     )
     write_table(
@@ -405,9 +414,7 @@ def generate_mae_vs_md_figure(wsga_pf, ri_pf):
         # Panel label
         ax_reinv.text(-0.02, 1.15, cfg["panel"], transform=ax_reinv.transAxes,
                       fontsize=9, fontweight="bold", va="bottom", ha="left")
-        # Property name
-        ax_main.text(0.97, 0.95, cfg["name"], transform=ax_main.transAxes,
-                     fontsize=7, va="top", ha="right")
+        # Property name removed per user preference
 
         # REINVENT histogram (green, top)
         ax_reinv.hist(reinv_md, bins=bins, color=COLOR_REINVENT, alpha=0.7,
