@@ -32,7 +32,8 @@ FIG_OUT = MANUSCRIPT / "Figures" / "OOD"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 FIG_OUT.mkdir(parents=True, exist_ok=True)
 
-PUBCHEM_CORPUS = REPO / "data" / "pubchem_cho_5_30ha.csv"
+NIST_DIR = REPO / "training" / "data" / "nist_8100"
+CONSTRAINT_DIR = REPO / "training" / "data" / "constraints"
 
 # ── Thresholds ──────────────────────────────────────────────────────────
 P90 = {"fom1_40C": 7.933, "dc": 4.909, "fp": 7.655, "mp": 12.952}
@@ -125,13 +126,23 @@ def canonicalise(smi):
     return Chem.MolToSmiles(mol) if mol else None
 
 
-def load_pubchem_corpus():
-    corpus = pd.read_csv(PUBCHEM_CORPUS)["SMILES"]
+def load_nist_corpus():
+    """Load all unique SMILES from NIST 8100 + constraint training sets."""
     canon = set()
-    for smi in corpus:
-        c = canonicalise(str(smi))
-        if c:
-            canon.add(c)
+    for f in NIST_DIR.glob("*_cho_cleaned.csv"):
+        df = pd.read_csv(f)
+        col = "SMILES" if "SMILES" in df.columns else df.columns[0]
+        for smi in df[col].dropna():
+            c = canonicalise(str(smi))
+            if c:
+                canon.add(c)
+    for f in CONSTRAINT_DIR.glob("*.csv"):
+        df = pd.read_csv(f, low_memory=False)
+        if "SMILES" in df.columns:
+            for smi in df["SMILES"].dropna():
+                c = canonicalise(str(smi))
+                if c:
+                    canon.add(c)
     return canon
 
 
@@ -212,9 +223,10 @@ def main():
     deduped = combined.drop_duplicates("SMILES", keep="last").copy()
     deduped.loc[deduped.SMILES.isin(both), "source"] = "both"
 
-    # Novelty check
-    print("Loading PubChem corpus...")
-    corpus = load_pubchem_corpus()
+    # Novelty check (against NIST training set)
+    print("Loading NIST training corpus...")
+    corpus = load_nist_corpus()
+    print(f"  NIST corpus: {len(corpus)} unique SMILES")
     deduped["is_novel"] = [canonicalise(s) not in corpus for s in deduped.SMILES]
     print(f"  Novel: {deduped.is_novel.sum()}/{len(deduped)}")
 
