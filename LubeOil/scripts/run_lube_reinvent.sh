@@ -6,24 +6,24 @@
 #
 # Usage:
 #   bash LubeOil/scripts/run_lube_reinvent.sh [profile|idx]
-#   qsub -J 0-5 LubeOil/scripts/run_lube_reinvent.sh
+#   qsub -J 0-4 LubeOil/scripts/run_lube_reinvent.sh
 
 set -euo pipefail
 
-PROFILES=(visc tc hc dvi tox even)
+PROFILES=(visc tc hc dvi even)
 
 if [[ -n "${PBS_ARRAY_INDEX:-}" ]]; then
     IDX=${PBS_ARRAY_INDEX}
-elif [[ $# -ge 1 && "$1" =~ ^[0-5]$ ]]; then
+elif [[ $# -ge 1 && "$1" =~ ^[0-4]$ ]]; then
     IDX=$1
 elif [[ $# -ge 1 ]]; then
     PROFILE=$1
     for i in "${!PROFILES[@]}"; do
         [[ "${PROFILES[$i]}" == "$PROFILE" ]] && IDX=$i
     done
-    IDX=${IDX:-5}
+    IDX=${IDX:-4}
 else
-    IDX=5
+    IDX=4
 fi
 
 PROFILE=${PROFILES[$IDX]}
@@ -45,6 +45,8 @@ python reinvent/run_lube_reinvent.py \
     --sigma 1.0 \
     --lr_rl 5e-5 \
     --convergence_patience 200 \
+    --molprice_soft 3.0 \
+    --molprice_hard 6.0 \
     --no_biodeg \
     --output_dir "../../$OUT_DIR" \
     --model_dir "../../models" \

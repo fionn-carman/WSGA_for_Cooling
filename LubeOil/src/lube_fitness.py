@@ -11,14 +11,14 @@ import pandas as pd
 from dvi import compute_dvi, estimate_density_100C
 
 
-# Weights for (visc, tc, hc, dvi, tox, sc).
+# Weights for (visc, tc, hc, dvi, sc). Tox is not in the fitness — it still
+# acts as a hard validity gate via --tox_threshold.
 WEIGHT_PROFILES = {
-    "visc": (3, 1, 1, 1, 1, 1),
-    "tc":   (1, 3, 1, 1, 1, 1),
-    "hc":   (1, 1, 3, 1, 1, 1),
-    "dvi":  (1, 1, 1, 3, 1, 1),
-    "tox":  (1, 1, 1, 1, 3, 1),
-    "even": (1, 1, 1, 1, 1, 1),
+    "visc": (3, 1, 1, 1, 1),
+    "tc":   (1, 3, 1, 1, 1),
+    "hc":   (1, 1, 3, 1, 1),
+    "dvi":  (1, 1, 1, 3, 1),
+    "even": (1, 1, 1, 1, 1),
 }
 
 
@@ -45,7 +45,7 @@ def add_dvi_and_lube_fitness(df: pd.DataFrame, weight_profile: str = "even") -> 
     SCScore, Tox21_Score.
     """
     weights = WEIGHT_PROFILES[weight_profile]
-    w_visc, w_tc, w_hc, w_dvi, w_tox, w_sc = weights
+    w_visc, w_tc, w_hc, w_dvi, w_sc = weights
 
     df = df.copy()
 
@@ -62,12 +62,11 @@ def add_dvi_and_lube_fitness(df: pd.DataFrame, weight_profile: str = "even") -> 
     n_tc = _minmax(df["tc_40C"], invert=False)
     n_hc = _minmax(df["cpsat_40C"], invert=False)
     n_dvi = _minmax(df["DVI"], invert=False)
-    n_tox = _minmax(df["Tox21_Score"], invert=True)
     n_sc = _minmax(df["SCScore"], invert=True)
 
     weighted = (
         w_visc * n_visc + w_tc * n_tc + w_hc * n_hc
-        + w_dvi * n_dvi + w_tox * n_tox + w_sc * n_sc
+        + w_dvi * n_dvi + w_sc * n_sc
     ) / float(sum(weights))
 
     df["FOM_LUBE"] = np.where(np.isfinite(weighted), weighted, 0.0)

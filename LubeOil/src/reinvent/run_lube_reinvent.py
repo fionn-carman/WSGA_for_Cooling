@@ -138,7 +138,7 @@ def main():
     parser.add_argument("--target", type=str, default="FOM_LUBE",
                         choices=["FOM_LUBE"])
     parser.add_argument("--weight_profile", type=str, default="even",
-                        choices=["visc", "tc", "hc", "dvi", "tox", "even"])
+                        choices=["visc", "tc", "hc", "dvi", "even"])
     parser.add_argument("--output_dir", type=str, default="../outputs")
     parser.add_argument("--model_dir", type=str, default="../models")
     parser.add_argument("--training_data_dir", type=str,
@@ -150,7 +150,7 @@ def main():
     parser.add_argument("--bp_threshold", type=float, default=-1e9)
     parser.add_argument("--fp_threshold", type=float, default=373)
     parser.add_argument("--sc_threshold", type=float, default=3)
-    parser.add_argument("--tox_threshold", type=float, default=3)
+    parser.add_argument("--tox_threshold", type=float, default=0.8)
     parser.add_argument("--no_biodeg", action="store_true")
     parser.add_argument("--molprice_soft", type=float, default=0.0)
     parser.add_argument("--molprice_hard", type=float, default=0.0)

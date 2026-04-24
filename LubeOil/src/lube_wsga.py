@@ -89,8 +89,8 @@ parser.add_argument("--target", type=str, default="FOM_LUBE",
     help="Target property to optimize (lubricant weighted-sum fitness)"
 )
 parser.add_argument("--weight_profile", type=str, default="even",
-    choices=["visc", "tc", "hc", "dvi", "tox", "even"],
-    help="Which objective carries 3x weight in the weighted sum (Egheosas's six-run protocol)"
+    choices=["visc", "tc", "hc", "dvi", "even"],
+    help="Which objective carries 3x weight in the weighted sum"
 )
 parser.add_argument("--max_heavy_atoms", type=int, default=50,
     help="Maximum heavy-atom count (lubricants span C20-C40+; default 50)")
@@ -103,7 +103,7 @@ parser.add_argument("--bp_threshold", type=float, default=-1e9, help="Min boilin
 parser.add_argument("--dc_threshold", type=float, default=1e9, help="Max dielectric constant - disabled for lubricants by default")
 parser.add_argument("--fp_threshold", type=float, default=373, help="Min flash point (K)")
 parser.add_argument("--sc_threshold", type=float, default=3, help="Max SCScore")
-parser.add_argument("--tox_threshold", type=float, default=3, help="Max Tox21 score")
+parser.add_argument("--tox_threshold", type=float, default=0.8, help="Max averaged Tox21 probability (hard gate)")
 parser.add_argument("--no_biodeg", action="store_true", help="Disable biodegradability filter")
 parser.add_argument("--molprice_model", type=str, default=None,
     help="Path to MolPrice model weights (.pkl). Enables MolPrice cost penalty.")
