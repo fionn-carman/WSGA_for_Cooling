@@ -1,4 +1,11 @@
 #!/bin/bash
+#PBS -N lube_wsga
+#PBS -l walltime=48:00:00
+#PBS -l select=1:ncpus=1:mem=32gb
+#PBS -J 0-4
+#PBS -o /dev/null
+#PBS -e /dev/null
+
 # WSGA for lubricant base-oil design.
 # Same GA (and production hyperparameters) as our cooling-fluid paper; only the
 # fitness function (FOM_LUBE) is different.
@@ -12,6 +19,11 @@
 #   qsub -J 0-4 LubeOil/scripts/run_lube_wsga.sh          # HPC, all five
 
 set -euo pipefail
+
+# Move to repo root regardless of where qsub/bash was invoked from.
+if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
+    cd "$PBS_O_WORKDIR"
+fi
 
 PROFILES=(visc tc hc dvi even)
 

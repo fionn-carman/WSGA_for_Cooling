@@ -1,4 +1,11 @@
 #!/bin/bash
+#PBS -N lube_reinvent
+#PBS -l walltime=48:00:00
+#PBS -l select=1:ncpus=1:mem=32gb
+#PBS -J 0-4
+#PBS -o /dev/null
+#PBS -e /dev/null
+
 # REINVENT for lubricant base-oil design.
 # Production HPs from ML-for-Immersion-Cooling manuscript:
 #   lr_rl=5e-5, sigma=1.0, batch_size=128, convergence_patience=200.
@@ -9,6 +16,10 @@
 #   qsub -J 0-4 LubeOil/scripts/run_lube_reinvent.sh
 
 set -euo pipefail
+
+if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
+    cd "$PBS_O_WORKDIR"
+fi
 
 PROFILES=(visc tc hc dvi even)
 
