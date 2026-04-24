@@ -92,15 +92,15 @@ parser.add_argument("--weight_profile", type=str, default="even",
     choices=["visc", "tc", "hc", "dvi", "tox", "even"],
     help="Which objective carries 3x weight in the weighted sum (Egheosas's six-run protocol)"
 )
-parser.add_argument("--max_heavy_atoms", type=int, default=30,
-    help="Maximum heavy-atom count (same as cooling GA default)")
+parser.add_argument("--max_heavy_atoms", type=int, default=50,
+    help="Maximum heavy-atom count (lubricants span C20-C40+; default 50)")
 parser.add_argument("--top_n", type=int, default=40, help="Number of top molecules to track and visualize")
 parser.add_argument("--num_generations", type=int, default=200, help="Number of generations to run")
 
 # Validity threshold arguments (for case studies)
-parser.add_argument("--mp_threshold", type=float, default=-30, help="Max melting point (°C) - hard cutoff")
-parser.add_argument("--bp_threshold", type=float, default=70, help="Min boiling point (°C)")
-parser.add_argument("--dc_threshold", type=float, default=8, help="Max dielectric constant")
+parser.add_argument("--mp_threshold", type=float, default=1e9, help="Max melting point (°C) - disabled for lubricants by default")
+parser.add_argument("--bp_threshold", type=float, default=-1e9, help="Min boiling point (°C) - disabled for lubricants by default")
+parser.add_argument("--dc_threshold", type=float, default=1e9, help="Max dielectric constant - disabled for lubricants by default")
 parser.add_argument("--fp_threshold", type=float, default=373, help="Min flash point (K)")
 parser.add_argument("--sc_threshold", type=float, default=3, help="Max SCScore")
 parser.add_argument("--tox_threshold", type=float, default=3, help="Max Tox21 score")

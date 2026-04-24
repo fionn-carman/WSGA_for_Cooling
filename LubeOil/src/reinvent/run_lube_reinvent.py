@@ -145,10 +145,10 @@ def main():
                         default="../training/data")
     parser.add_argument("--top_n", type=int, default=40)
 
-    # Validity thresholds (lubricant — dielectric constant dropped)
-    parser.add_argument("--mp_threshold", type=float, default=-30)
-    parser.add_argument("--bp_threshold", type=float, default=150)
-    parser.add_argument("--fp_threshold", type=float, default=423)
+    # Validity thresholds — mp/bp/dc disabled by default for lubricants
+    parser.add_argument("--mp_threshold", type=float, default=1e9)
+    parser.add_argument("--bp_threshold", type=float, default=-1e9)
+    parser.add_argument("--fp_threshold", type=float, default=373)
     parser.add_argument("--sc_threshold", type=float, default=3)
     parser.add_argument("--tox_threshold", type=float, default=3)
     parser.add_argument("--no_biodeg", action="store_true")

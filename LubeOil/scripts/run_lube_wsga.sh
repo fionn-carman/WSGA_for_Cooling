@@ -50,6 +50,7 @@ python lube_wsga.py \
     --tournament_k 5 \
     --Tau 0.25 \
     --niching_radius 2 \
+    --max_heavy_atoms 50 \
     --no_biodeg \
     --output_dir "../../$OUT_DIR" \
     --model_dir "../../models" \
