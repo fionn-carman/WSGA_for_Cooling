@@ -33,6 +33,39 @@ from evaluation import strict_canonicalize_smiles
 from lube_fitness import add_dvi_and_lube_fitness
 
 
+def load_nist8100_corpus(training_data_dir):
+    """Collect unique canonical CHO SMILES from NIST 8100 training data."""
+    import glob
+    nist_dir = os.path.join(training_data_dir, "nist_8100")
+    csv_files = glob.glob(os.path.join(nist_dir, "*_cho_cleaned.csv"))
+    all_smiles = set()
+    for csv_path in csv_files:
+        try:
+            df = pd.read_csv(csv_path, usecols=["SMILES"])
+            for smi in df["SMILES"].dropna():
+                mol = Chem.MolFromSmiles(smi)
+                if mol is not None:
+                    all_smiles.add(Chem.MolToSmiles(mol, canonical=True, isomericSmiles=False))
+        except Exception as e:
+            print(f"Warning: could not load {csv_path}: {e}")
+    smiles_list = sorted(all_smiles)
+    print(f"Loaded {len(smiles_list)} unique CHO SMILES from NIST 8100")
+    return smiles_list
+
+
+def load_expanded_corpus(pubchem_path, nist_path=None):
+    """Load PubChem CHO corpus, optionally merged with NIST 8100."""
+    pubchem_df = pd.read_csv(pubchem_path)
+    pubchem_smiles = set(pubchem_df["SMILES"].dropna().tolist())
+    print(f"Loaded {len(pubchem_smiles)} PubChem CHO SMILES from {pubchem_path}")
+    if nist_path:
+        nist_smiles = load_nist8100_corpus(nist_path)
+        n_before = len(pubchem_smiles)
+        pubchem_smiles.update(nist_smiles)
+        print(f"Merged with NIST 8100: +{len(pubchem_smiles) - n_before} new, {len(pubchem_smiles)} total")
+    return sorted(pubchem_smiles)
+
+
 def _sigmoid(x):
     return 1.0 / (1.0 + np.exp(-np.clip(x, -500, 500)))
 

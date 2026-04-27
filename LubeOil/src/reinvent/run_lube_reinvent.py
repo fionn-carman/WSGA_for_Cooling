@@ -34,8 +34,7 @@ if _src_dir not in sys.path:
 
 from reinvent.vocabulary import SMILESVocabulary
 from reinvent.model import GRUModel
-from reinvent.reward import load_nist8100_corpus, load_expanded_corpus
-from reinvent.lube_reward import LubricantReward
+from reinvent.lube_reward import LubricantReward, load_nist8100_corpus, load_expanded_corpus
 from reinvent.trainer import pretrain, ReinventTrainer
 from reinvent.augment import augment_corpus
 
