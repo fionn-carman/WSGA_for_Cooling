@@ -1,0 +1,34 @@
+#!/bin/bash
+#PBS -N MLP_biodeg
+#PBS -l select=1:ncpus=8:mem=32gb
+#PBS -l walltime=16:00:00
+#PBS -o /rds/general/user/fc4018/projects/fionn2023/live/WSGA_for_Cooling/training/MLP/constraints/logs/
+#PBS -e /rds/general/user/fc4018/projects/fionn2023/live/WSGA_for_Cooling/training/MLP/constraints/logs/
+
+# MLP arm of the biodegradability classifier comparison. The benchmark's ten
+# regression targets cover four architectures; the classifier was XGBoost only.
+# Same md5_mod5 folds and the same 100-trial Optuna budget as the XGBoost
+# reference, so the two are paired fold by fold.
+set -euo pipefail
+
+WORKDIR=/rds/general/user/fc4018/projects/fionn2023/live/WSGA_for_Cooling/training/MLP/constraints
+cd "$WORKDIR"
+mkdir -p logs
+
+source /rds/general/user/fc4018/home/miniforge3/etc/profile.d/conda.sh
+conda activate mol-rl
+
+export MPLCONFIGDIR="$TMPDIR/mpl"
+mkdir -p "$MPLCONFIGDIR"
+
+LOG="logs/biodeg_${PBS_JOBID}.log"
+{
+  echo "=== MLP biodegradability classifier ==="
+  echo "Job ID: $PBS_JOBID"
+  echo "Node: $(hostname)"
+  echo "Start: $(date)"
+  echo ""
+  python train_biodeg.py --n_trials 100
+  echo ""
+  echo "End: $(date)"
+} 2>&1 | tee "$LOG"

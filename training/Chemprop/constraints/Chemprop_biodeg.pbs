@@ -1,0 +1,35 @@
+#!/bin/bash
+#PBS -N Chemprop_biodeg
+#PBS -l select=1:ncpus=4:mem=32gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=24:00:00
+#PBS -o /rds/general/user/fc4018/projects/fionn2023/live/WSGA_for_Cooling/training/Chemprop/constraints/logs/
+#PBS -e /rds/general/user/fc4018/projects/fionn2023/live/WSGA_for_Cooling/training/Chemprop/constraints/logs/
+
+# D-MPNN arm of the biodegradability classifier comparison. Nested Optuna
+# search matching tune_single_temp.py, on the same md5_mod5 folds as the
+# XGBoost reference classifier. The Optuna study is persisted to SQLite, so a
+# walltime kill can be resumed by resubmitting.
+set -euo pipefail
+
+WORKDIR=/rds/general/user/fc4018/projects/fionn2023/live/WSGA_for_Cooling/training/Chemprop/constraints
+cd "$WORKDIR"
+mkdir -p logs
+
+source /rds/general/user/fc4018/home/miniforge3/etc/profile.d/conda.sh
+conda activate mol-rl
+
+export MPLCONFIGDIR="$TMPDIR/mpl"
+mkdir -p "$MPLCONFIGDIR"
+
+LOG="logs/biodeg_${PBS_JOBID}.log"
+{
+  echo "=== Chemprop D-MPNN biodegradability classifier ==="
+  echo "Job ID: $PBS_JOBID"
+  echo "Node: $(hostname)"
+  nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
+  echo "Start: $(date)"
+  echo ""
+  python train_biodeg.py --trials 20
+  echo ""
+  echo "End: $(date)"
+} 2>&1 | tee "$LOG"

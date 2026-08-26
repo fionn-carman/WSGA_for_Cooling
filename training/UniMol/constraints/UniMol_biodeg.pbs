@@ -1,0 +1,35 @@
+#!/bin/bash
+#PBS -N UniMol_biodeg
+#PBS -l select=1:ncpus=4:mem=48gb:ngpus=1:gpu_type=L40S
+#PBS -l walltime=24:00:00
+#PBS -o /rds/general/user/fc4018/projects/fionn2023/live/WSGA_for_Cooling/training/UniMol/constraints/logs/
+#PBS -e /rds/general/user/fc4018/projects/fionn2023/live/WSGA_for_Cooling/training/UniMol/constraints/logs/
+
+# Uni-Mol arm of the biodegradability classifier comparison. Unlike the Uni-Mol
+# regression models, this one is tuned: the XGBoost classifier it is compared
+# against had 100 Optuna trials, so running Uni-Mol at defaults would repeat the
+# asymmetry that made the untuned D-MPNN regression numbers misleading.
+set -euo pipefail
+
+WORKDIR=/rds/general/user/fc4018/projects/fionn2023/live/WSGA_for_Cooling/training/UniMol/constraints
+cd "$WORKDIR"          # unimol_tools writes ./logs, so cwd must be writable
+mkdir -p logs
+
+source /rds/general/user/fc4018/home/miniforge3/etc/profile.d/conda.sh
+conda activate mol-rl
+
+export MPLCONFIGDIR="$TMPDIR/mpl"
+mkdir -p "$MPLCONFIGDIR"
+
+LOG="logs/biodeg_${PBS_JOBID}.log"
+{
+  echo "=== Uni-Mol biodegradability classifier ==="
+  echo "Job ID: $PBS_JOBID"
+  echo "Node: $(hostname)"
+  nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
+  echo "Start: $(date)"
+  echo ""
+  python train_biodeg.py --trials 12
+  echo ""
+  echo "End: $(date)"
+} 2>&1 | tee "$LOG"
