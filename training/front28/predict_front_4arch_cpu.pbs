@@ -1,0 +1,25 @@
+#!/bin/bash
+#PBS -N front28_4arch
+#PBS -l select=1:ncpus=8:mem=64gb
+#PBS -l walltime=06:00:00
+#PBS -o /rds/general/user/fc4018/projects/fionn2023/live/WSGA_for_Cooling/training/front28/logs/
+#PBS -e /rds/general/user/fc4018/projects/fionn2023/live/WSGA_for_Cooling/training/front28/logs/
+
+set -uo pipefail
+
+WORKDIR=/rds/general/user/fc4018/projects/fionn2023/live/WSGA_for_Cooling/training/front28
+cd "$WORKDIR"
+mkdir -p logs
+
+source /rds/general/user/fc4018/home/miniforge3/etc/profile.d/conda.sh
+conda activate mol-rl
+
+export MPLCONFIGDIR="$TMPDIR/mpl"
+mkdir -p "$MPLCONFIGDIR"
+
+echo "=== front 28: four-architecture property prediction ==="
+nvidia-smi --query-gpu=name,memory.total --format=csv 2>/dev/null || echo "no GPU"
+python -u predict_front_4arch.py \
+    --smiles_csv front28.csv \
+    --out front28_predictions_long.csv
+echo "=== done rc=$? ==="
