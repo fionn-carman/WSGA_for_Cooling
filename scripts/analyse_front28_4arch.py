@@ -54,6 +54,14 @@ PROP_ORDER = ["fom1", "fp", "mp", "bp", "dc",
               "density", "viscosity", "tc", "cpsat", "beta"]
 
 
+def deployed_props(path, index):
+    """The deployed full-data-refit XGBoost values the GA filtered on."""
+    if not path or not Path(path).exists():
+        return None
+    d = pd.read_csv(path).drop_duplicates("SMILES").set_index("SMILES")
+    return d.reindex(index)
+
+
 def pareto_front(df, xcol, ycol):
     """Indices of the non-dominated set, both objectives maximised."""
     pts = df[[xcol, ycol]].values
@@ -74,6 +82,11 @@ def main():
     ap.add_argument("--reference", required=True,
                     help="pooled.csv: the deployed-model front the 28 came from")
     ap.add_argument("--outdir", required=True)
+    ap.add_argument("--deployed", default=None,
+                    help="front_props.csv: the deployed full-refit XGBoost "
+                         "values the GA actually filtered on")
+    ap.add_argument("--metrics", default=None,
+                    help="benchmark_metrics.csv: prop,arch,r2,mae,rmse")
     args = ap.parse_args()
 
     outdir = Path(args.outdir)
@@ -207,9 +220,60 @@ def main():
          "all_pass", "on_front_feasible"]]
     print(hdr.round(2).to_string())
 
+    # ---- 4b. where the attrition comes from --------------------------------
+    # Three distinct things can move a molecule across a gate:
+    #   (i)   full-data refit -> five-fold ensemble, same architecture
+    #   (ii)  one architecture -> another
+    #   (iii) averaging the four
+    # Reporting only (iii) would blame architecture disagreement for an
+    # attrition that is mostly (i).
+    dep = ref.set_index("SMILES")
+    dep_props = deployed_props(args.deployed, mean_w.index)
+
+    print("\nGate pass counts out of 28, by model:")
+    hdr = ["deployed"] + ARCHS + ["consensus"]
+    print(f"  {'gate':<6}" + "".join(f"{h:>11}" for h in hdr))
+    for p, (op, thr, _) in GATES.items():
+        cells = []
+        if dep_props is not None and p in dep_props:
+            v = dep_props[p]
+            cells.append((v <= thr).sum() if op == "<=" else (v >= thr).sum())
+        else:
+            cells.append("-")
+        for a in ARCHS:
+            if (p, a) not in arch_w.columns:
+                cells.append("-")
+                continue
+            v = arch_w[(p, a)]
+            cells.append((v <= thr).sum() if op == "<=" else (v >= thr).sum())
+        v = mean_w[p]
+        cells.append((v <= thr).sum() if op == "<=" else (v >= thr).sum())
+        print(f"  {p:<6}" + "".join(f"{str(c):>11}" for c in cells))
+
+    rows = []
+    for label, get in ([("deployed", lambda p: dep_props[p])]
+                       if dep_props is not None else []) + \
+                      [(a, (lambda p, a=a: arch_w[(p, a)])) for a in ARCHS] + \
+                      [("consensus", lambda p: mean_w[p])]:
+        ok = np.ones(len(mean_w), bool)
+        for p, (op, thr, _) in GATES.items():
+            v = get(p).values
+            ok &= (v <= thr) if op == "<=" else (v >= thr)
+        rows.append({"model": label, "passes_all_four_gates": int(ok.sum()),
+                     "of": len(mean_w)})
+    dec = pd.DataFrame(rows)
+    dec.to_csv(outdir / "front28_gate_attrition.csv", index=False)
+    print("\nPasses all four gates simultaneously:")
+    for r in rows:
+        print(f"  {r['model']:<10} {r['passes_all_four_gates']:>3}/{r['of']}")
+
     # ---- 5. figures --------------------------------------------------------
+    mae = None
+    if args.metrics and Path(args.metrics).exists():
+        m = pd.read_csv(args.metrics)
+        mae = m.groupby("prop").mae.mean().to_dict()
     make_front_figure(fr, outdir)
-    make_spread_figure(arch_val, cons, outdir)
+    make_spread_figure(arch_val, cons, outdir, mae=mae)
     make_gate_figure(gates, outdir)
 
     print(f"\nWrote to {outdir}:")
@@ -231,9 +295,15 @@ def make_front_figure(fr, outdir):
     ax.scatter(keep.fp_C, keep.fom1, s=26, color="#4c72b0", zorder=3,
                label=f"passes all gates ({len(keep)})")
 
+    # the front the 28 sit on when the gates are ignored — isolates how the
+    # FOM1/flash-point trade-off itself moves, separately from gate attrition
+    na = fr[fr.on_front_all].sort_values("fp_C")
+    ax.step(na.fp_C, na.fom1, where="post", color="#4c72b0", lw=1.2, ls=":",
+            zorder=2, label=f"consensus front, gates ignored ({len(na)})")
+
     nf = fr[fr.on_front_feasible].sort_values("fp_C")
     ax.step(nf.fp_C, nf.fom1, where="post", color="#4c72b0", lw=1.4,
-            zorder=2, label=f"consensus front ({len(nf)})")
+            zorder=2, label=f"consensus front, gates applied ({len(nf)})")
 
     od = fr.sort_values("fp_C_deployed")
     ax.plot(od.fp_C_deployed, od.fom1_deployed, color="0.4", lw=1.0, ls="--",
@@ -253,10 +323,22 @@ def make_front_figure(fr, outdir):
     plt.close(fig)
 
 
-def make_spread_figure(arch_val, cons, outdir):
-    """Relative between-architecture spread, per property."""
+def make_spread_figure(arch_val, cons, outdir, mae=None):
+    """Between-architecture spread per property, in units of the property's own
+    out-of-fold MAE. A value above 1 means the four architectures disagree with
+    each other by more than any one of them is typically wrong on held-out
+    data — i.e. the benchmark R2 does not transfer to these molecules.
+
+    Normalising by the consensus mean is wrong here: melting point straddles
+    zero, so a percentage is meaningless for it.
+    """
     c = cons.copy()
-    c["rel"] = 100 * c["std"] / c["mean"].abs()
+    if mae is None:
+        c["rel"] = 100 * c["std"] / c["mean"].abs()
+        ylabel = "Between-architecture SD / % of consensus mean"
+    else:
+        c["rel"] = c["std"] / c["prop"].map(mae)
+        ylabel = "Between-architecture SD / out-of-fold MAE"
     order = [p for p in PROP_ORDER if p in set(c["prop"])]
 
     fig, ax = plt.subplots(figsize=(6, 4), dpi=150)
@@ -273,9 +355,14 @@ def make_spread_figure(arch_val, cons, outdir):
         w.set_color("0.35")
         w.set_linewidth(0.9)
 
+    if mae is not None:
+        ax.axhline(1.0, color="#c44e52", lw=1.0, ls="--", zorder=0)
+        ax.text(len(order) + 0.45, 1.0, "parity with\nsingle-model MAE",
+                fontsize=6.5, color="#c44e52", va="center", ha="right")
+
     ax.set_xticks(range(1, len(order) + 1))
     ax.set_xticklabels(order, rotation=45, ha="right", fontsize=8)
-    ax.set_ylabel("Between-architecture SD / % of consensus mean")
+    ax.set_ylabel(ylabel)
     fig.tight_layout()
     for ext in ("png", "pdf"):
         fig.savefig(outdir / f"front28_arch_spread.{ext}", bbox_inches="tight")
